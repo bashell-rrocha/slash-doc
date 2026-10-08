@@ -105,7 +105,7 @@ A principal diferença: React reconcilia uma árvore virtual, Slash substitui os
 
 Esta página não traz benchmarks nem comparação de tamanho com o React: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **7,94 KB gzip** (7,03 KB brotli). O número depende do que seu app importa.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **8,00 KB gzip** (7,10 KB brotli). O número depende do que seu app importa.
 
 ---
 
@@ -348,7 +348,7 @@ Se você precisa de um ecossistema maduro e extenso, React é a escolha mais seg
    - Aplicações com poucas dependências
 
 2. **Bundle Size Limitado**
-   - Um app mínimo mede 7,94 KB gzip (veja a seção Performance)
+   - Um app mínimo mede 8,00 KB gzip (veja a seção Performance)
    - Quando cada dependência conta
    - Embedded apps
 
@@ -458,7 +458,7 @@ function TodoItem({ todo, onToggle }) {
 ### Slash
 
 **Prós:**
-- ✅ Bundle pequeno (app mínimo medido em 7,94 KB gzip, veja a seção Performance)
+- ✅ Bundle pequeno (app mínimo medido em 8,00 KB gzip, veja a seção Performance)
 - ✅ API minimalista e direta
 - ✅ SSR nativo
 - ✅ TypeScript first-class
@@ -484,7 +484,7 @@ function TodoItem({ todo, onToggle }) {
 
 **Escolha Slash se:**
 - Quer uma biblioteca pequena e sem dependências
-- Bundle size é limitação (app mínimo: 7,94 KB gzip)
+- Bundle size é limitação (app mínimo: 8,00 KB gzip)
 - Prefere simplicidade
 - Gosta de controle direto
 - App pequena/média
