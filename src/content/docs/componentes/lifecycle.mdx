@@ -1,390 +1,176 @@
 ---
 title: Lifecycle e Cleanup
-description: Gerenciamento de recursos e limpeza de memória em componentes Slash
+description: Como o Slash executa componentes, limpa o que cria e o que fica por sua conta
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 ## Lifecycle no Slash
 
-Diferente de frameworks como React ou Vue, o Slash **não possui lifecycle hooks** explícitos como `useEffect`, `onMounted`, ou `beforeDestroy`. Em vez disso, o lifecycle é gerenciado de forma **automática e transparente** através do sistema de cleanup baseado em WeakMap.
+O Slash **não possui lifecycle hooks** como `useEffect`, `onMounted` ou `onCleanup`. O ciclo de vida de um componente é simples:
 
-### Como funciona
-
-1. **Criação**: Ao ser montado como `<${Counter} />`, o componente executa e retorna um nó DOM. Cada `state.get()` chamado nessa execução registra o state como dependência do componente
-2. **Reatividade**: Quando um desses states muda, o componente executa de novo e seus nós anteriores são substituídos pelos novos
-3. **Cleanup**: Quando um nó é removido do DOM, subscriptions são canceladas automaticamente
+1. **Montagem**: ao ser montado como `<${Counter} />`, o componente executa e retorna um nó DOM. Cada `state.get()` chamado nessa execução registra o state como dependência do componente.
+2. **Re-render**: quando um desses states muda, o componente executa de novo, os nós anteriores são destruídos e os novos os substituem.
+3. **Remoção**: quando os nós saem da tela por um re-render ou por `render()` sobre o mesmo container, o Slash destrói os nós antigos (veja abaixo).
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 
 // O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
 const count = createState(0)
 
 function Counter() {
-  // ✅ Ler count.get() durante a execução inscreve o componente no state
+  // Ler count.get() durante a execução inscreve o componente no state
   return html`
     <div>
       <p>Contador: ${count.get()}</p>
       <button onClick=${() => count.set(count.get() + 1)}>+1</button>
     </div>
   `
-  // Quando este elemento é removido do DOM, a subscription é limpa automaticamente
 }
 
 // Monte como <${Counter} />. Chamar Counter() diretamente não é reativo
-const app = html`<${Counter} />`
-
+render(html`<${Counter} />`, '#app')
 ```
 
-## Sistema de Cleanup automático
-
-O Slash mantém um `WeakMap` interno que rastreia cleanups associados a cada nó DOM:
-
-```typescript
-// Internamente no Slash (src/lifecycle/cleanup.ts)
-const CLEANUPS = new WeakMap<Node, Array<() => void>>()
-
-export function addCleanup(node: Node, fn: () => void): void {
-  const arr = CLEANUPS.get(node)
-  if (arr) arr.push(fn)
-  else CLEANUPS.set(node, [fn])
-}
-
-export function destroyNode(node: Node): void {
-  const fns = CLEANUPS.get(node)
-  if (fns) {
-    for (const f of fns) {
-      try { f() } catch {}
-    }
-    CLEANUPS.delete(node)
-  }
-  // Recursivamente destrói children
-  if (node instanceof Element && node.hasChildNodes()) {
-    node.childNodes.forEach((child) => destroyNode(child))
-  }
-}
-```
-
-### Quando o cleanup é executado?
-
-O cleanup é executado automaticamente quando:
-
-1. **Substituição de conteúdo reativo**: Quando um estado reativo muda e o conteúdo antigo é substituído
-2. **Remoção manual**: Quando você remove um elemento do DOM com `removeChild()` ou similar
-3. **Navegação de rotas**: Quando o router desmonta a view anterior
-
-<Aside type="note">
-O uso de `WeakMap` garante que não há memory leaks - quando um nó é garbage collected, suas entradas no WeakMap também são.
+<Aside type="caution">
+Como o componente re-executa, tudo que ele cria na execução é criado de novo: `createState()`, `watch()`, timers e listeners manuais. Não crie recursos de longa vida dentro do corpo do componente.
 </Aside>
 
-## Cleanup manual
+### Leia os states antes de qualquer retorno antecipado
 
-Embora o Slash gerencie automaticamente subscriptions de estados reativos, você pode precisar de cleanup manual para recursos externos.
-
-### Usando `addCleanup`
+Os states que o componente observa são os lidos na **primeira** execução. Um state lido só em um ramo que ainda não rodou não inscreve o componente:
 
 ```typescript
-import { html, addCleanup } from '@_bashell/slash'
+// ❌ data só é lido depois do retorno antecipado: na primeira execução não é inscrito
+const Profile = () => {
+  if (loading.get()) return html`<p>Carregando...</p>`
+  return html`<p>${data.get()}</p>`
+}
 
-function WebSocketComponent({ url }: { url: string }) {
-  const container = html`<div class="ws-status">Conectando...</div>` as HTMLElement
-
-  // Criar WebSocket
-  const ws = new WebSocket(url)
-
-  ws.onopen = () => {
-    container.textContent = 'Conectado!'
-  }
-
-  ws.onmessage = (event) => {
-    container.textContent = `Mensagem: ${event.data}`
-  }
-
-  ws.onerror = () => {
-    container.textContent = 'Erro de conexão'
-  }
-
-  // Registrar cleanup para fechar o WebSocket
-  addCleanup(container, () => {
-    console.log('Fechando WebSocket...')
-    ws.close()
-  })
-
-  return container
+// ✅ leia tudo no topo
+const Profile = () => {
+  const isLoading = loading.get()
+  const value = data.get()
+  if (isLoading) return html`<p>Carregando...</p>`
+  return html`<p>${value}</p>`
 }
 ```
 
-### Múltiplos cleanups
+## O que o Slash limpa sozinho
 
-Você pode registrar múltiplos cleanups para o mesmo nó:
+Internamente o Slash guarda funções de limpeza por nó DOM (num `WeakMap`) e as executa quando o nó é destruído. Isso cobre o que o próprio Slash cria:
 
-```typescript
-import { html, addCleanup } from '@_bashell/slash'
+- listeners de eventos registrados por props como `onClick`;
+- a inscrição de um componente nos states que ele leu;
+- inscrições de filhos e props reativos (`Router`, controles de formulário).
 
-function TimerComponent() {
-  const element = html`<div class="timer">0s</div>` as HTMLElement
-  let seconds = 0
+Os nós são destruídos quando:
 
-  // Timer 1: atualiza a cada segundo
-  const intervalId = setInterval(() => {
-    seconds++
-    element.textContent = `${seconds}s`
-  }, 1000)
+1. um componente re-renderiza e substitui seus nós antigos;
+2. `render(view, container)` é chamado sobre um container que já tem conteúdo;
+3. o `Router` troca a rota exibida.
 
-  // Timer 2: log a cada 5 segundos
-  const logIntervalId = setInterval(() => {
-    console.log(`Timer ativo há ${seconds} segundos`)
-  }, 5000)
+## `destroyNode()`
 
-  // Registrar cleanup para ambos os timers
-  addCleanup(element, () => {
-    clearInterval(intervalId)
-    console.log('Timer principal limpo')
-  })
-
-  addCleanup(element, () => {
-    clearInterval(logIntervalId)
-    console.log('Timer de log limpo')
-  })
-
-  return element
-}
-```
-
-## Patterns de lifecycle
-
-### Executar código na "montagem"
-
-Como componentes são funções que executam imediatamente, não há necessidade de um hook `onMounted`:
+`destroyNode(node)` é a única peça desse mecanismo que é pública (exportada por `@_bashell/slash` e `@_bashell/slash/core`). Ela executa as limpezas registradas pelo Slash no nó e em todos os descendentes. **Não remove o nó do DOM.**
 
 ```typescript
-function UserProfile({ userId }: { userId: number }) {
-  console.log('Componente criado') // Executa imediatamente
+import { html, render, destroyNode } from '@_bashell/slash'
 
-  // Fazer fetch na criação
-  fetchUser(userId).then(user => {
-    // Atualizar UI...
-  })
+const node = html`<button onClick=${() => console.log('oi')}>Oi</button>` as HTMLElement
+document.body.appendChild(node)
 
-  return html`<div>Carregando usuário ${userId}...</div>`
-}
+// Remover manualmente: destrua primeiro (remove os listeners), depois tire do DOM
+destroyNode(node)
+node.remove()
 ```
 
-### Reagir a mudanças de props
+Use `destroyNode` quando você remover à mão, com `removeChild()`/`remove()`, nós que o Slash criou.
 
-Para reagir a mudanças em props reativas, use `.watch()`:
+## O que não está disponível
 
-```typescript
-import { html, createState } from '@_bashell/slash'
-import type { State } from '@_bashell/slash'
-
-function UserDisplay({ userIdState }: { userIdState: State<number> }) {
-  const userData = createState<any>(null)
-  const element = html`<div>Carregando...</div>` as HTMLElement
-
-  // Atualizar UI quando userData mudar
-  const updateUI = (data: any) => {
-    if (data) {
-      element.innerHTML = `
-        <h3>${data.name}</h3>
-        <p>${data.email}</p>
-      `
-    } else {
-      element.textContent = 'Carregando...'
-    }
-  }
-
-  userData.watch(updateUI)
-
-  // Reagir a mudanças no userId
-  const unsub = userIdState.watch((newId) => {
-    console.log('UserId mudou para:', newId)
-    userData.set(null) // Reset
-
-    fetchUser(newId).then(user => {
-      userData.set(user)
-    })
-  })
-
-  // Fazer fetch inicial
-  fetchUser(userIdState.get()).then(user => {
-    userData.set(user)
-  })
-
-  // Cleanup da subscription
-  addCleanup(element, unsub)
-  addCleanup(element, () => {
-    console.log('UserDisplay desmontado')
-  })
-
-  return element
-}
-```
-
-<Aside type="tip">
-Sempre que você criar subscriptions manualmente com `.watch()`, registre o cleanup usando `addCleanup(node, unsub)` para evitar memory leaks!
+<Aside type="caution">
+`addCleanup`, `hasCleanups` e `renderComponent` existem no código, mas **não são exportados** pelo pacote (`@_bashell/slash`, `/core`, `/router`, `/forms` e `/ssr`). Não há API pública para registrar uma função de limpeza própria em um nó, nem hook de montagem ou de desmontagem.
 </Aside>
 
-### Prevenir memory leaks em event listeners externos
+Na prática isso significa que recursos externos (timers, `WebSocket`, `EventSource`, listeners em `window`) ficam sob sua responsabilidade.
+
+## Gerenciando recursos externos
+
+Mantenha o recurso fora do componente e controle início e fim explicitamente.
+
+### `watch()` devolve a função de cancelamento
 
 ```typescript
-import { html, addCleanup } from '@_bashell/slash'
+const count = createState(0)
 
-function ScrollTracker() {
-  const position = createState(0)
-  const element = html`
-    <div class="scroll-tracker">
-      <p>Scroll: ${position}px</p>
-    </div>
-  ` as HTMLElement
+const unwatch = count.watch((value) => {
+  console.log('count mudou para', value)
+})
 
-  // Event listener no window
-  const handleScroll = () => {
-    position.set(window.scrollY)
-  }
-
-  window.addEventListener('scroll', handleScroll)
-
-  // Limpar event listener quando componente for destruído
-  addCleanup(element, () => {
-    window.removeEventListener('scroll', handleScroll)
-    console.log('Event listener removido')
-  })
-
-  return element
-}
+// quando não precisar mais
+unwatch()
 ```
 
-## Exemplo completo: Gerenciamento de recursos
+Crie o `watch()` uma vez (no módulo ou em um handler), nunca no corpo de um componente, que executa várias vezes e acumularia watchers.
+
+### Timers e conexões
 
 ```typescript
-import { html, createState, addCleanup } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 
-function DataStreamComponent({ apiUrl }: { apiUrl: string }) {
-  const data = createState<string[]>([])
-  const status = createState<'connecting' | 'connected' | 'error'>('connecting')
+const seconds = createState(0)
+let timer: ReturnType<typeof setInterval> | null = null
 
-  const element = html`
-    <div class="data-stream">
-      <div class="status">
-        Status: ${status}
-      </div>
-      <ul>
-        ${data.get().map(item => html`<li>${item}</li>`)}
-      </ul>
-    </div>
-  ` as HTMLElement
-
-  // Criar EventSource para Server-Sent Events
-  const eventSource = new EventSource(apiUrl)
-
-  eventSource.onopen = () => {
-    status.set('connected')
-  }
-
-  eventSource.onmessage = (event) => {
-    const current = data.get()
-    data.set([...current, event.data])
-  }
-
-  eventSource.onerror = () => {
-    status.set('error')
-  }
-
-  // Timer para limpar dados antigos a cada minuto
-  const cleanupTimer = setInterval(() => {
-    const current = data.get()
-    if (current.length > 100) {
-      data.set(current.slice(-50)) // Manter apenas últimos 50
-    }
-  }, 60000)
-
-  // Registrar todos os cleanups
-  addCleanup(element, () => {
-    console.log('Fechando EventSource...')
-    eventSource.close()
-  })
-
-  addCleanup(element, () => {
-    console.log('Limpando timer...')
-    clearInterval(cleanupTimer)
-  })
-
-  addCleanup(element, () => {
-    console.log('Componente DataStream destruído')
-  })
-
-  return element
+const start = () => {
+  if (timer) return
+  timer = setInterval(() => seconds.set(seconds.get() + 1), 1000)
 }
+
+const stop = () => {
+  if (timer) clearInterval(timer)
+  timer = null
+}
+
+const Clock = () => html`
+  <div>
+    <p>${seconds.get()}s</p>
+    <button onClick=${start}>Iniciar</button>
+    <button onClick=${stop}>Parar</button>
+  </div>
+`
+
+render(html`<${Clock} />`, '#app')
 ```
 
-## Verificando cleanups (debugging)
+O mesmo vale para `fetch` com `AbortController`, `WebSocket` e listeners em `window`: crie e encerre em funções que você controla (handlers, ou o código que chama `render()`), não dentro do corpo do componente.
 
-O Slash exporta uma função `hasCleanups` para debugging:
+### Reagindo à mudança de um state
+
+Para executar um efeito quando um state muda, use `watch()` fora do componente:
 
 ```typescript
-import { html, addCleanup, hasCleanups } from '@_bashell/slash'
+const userId = createState<number | null>(null)
 
-function DebugComponent() {
-  const element = html`<div>Debug</div>` as HTMLElement
-
-  addCleanup(element, () => console.log('Limpando...'))
-
-  console.log('Tem cleanups?', hasCleanups(element)) // true
-
-  return element
-}
+userId.watch(async (id) => {
+  if (id === null) return
+  const user = await fetch(`/api/users/${id}`).then((r) => r.json())
+  userData.set(user)
+})
 ```
 
-## Best practices
+## Comparação
 
-1. **Sempre limpe subscriptions manuais**: Se você usar `.watch()` manualmente, registre o cleanup
-2. **Limpe timers e intervals**: Use `addCleanup` para `clearInterval`/`clearTimeout`
-3. **Remova event listeners externos**: Listeners no `window`, `document`, ou elementos fora do componente
-4. **Feche conexões**: WebSockets, EventSource, streams, etc.
-5. **Cancele requisições**: Use AbortController para cancelar fetches pendentes
-
-```typescript
-function FetchComponent({ url }: { url: string }) {
-  const element = html`<div>Carregando...</div>` as HTMLElement
-  const controller = new AbortController()
-
-  fetch(url, { signal: controller.signal })
-    .then(res => res.json())
-    .then(data => {
-      element.textContent = JSON.stringify(data)
-    })
-    .catch(err => {
-      if (err.name !== 'AbortError') {
-        element.textContent = 'Erro ao carregar'
-      }
-    })
-
-  addCleanup(element, () => {
-    controller.abort()
-    console.log('Fetch cancelado')
-  })
-
-  return element
-}
-```
-
-## Comparação com outros frameworks
-
-| Framework | Lifecycle Hooks | Cleanup |
-|-----------|----------------|---------|
-| **Slash** | ❌ Nenhum | ✅ Automático + `addCleanup()` |
-| **React** | ✅ `useEffect` | ✅ Return function |
-| **Vue** | ✅ `onMounted`, `onUnmounted` | ✅ `onUnmounted()` |
-| **Solid** | ✅ `onMount`, `onCleanup` | ✅ `onCleanup()` |
-
-<Aside type="note">
-A simplicidade do Slash vem de não ter lifecycle complexo - componentes re-executam quando um state que leram muda, e a limpeza é automática ou explícita via `addCleanup`, e cleanup é automático ou explícito via `addCleanup`.
-</Aside>
+| Framework | Hooks de lifecycle | Cleanup |
+|-----------|--------------------|---------|
+| **Slash** | Nenhum | Automático para o que o Slash cria; `destroyNode()` para remoção manual; recursos externos por sua conta |
+| **React** | `useEffect` | Função retornada |
+| **Vue** | `onMounted`, `onUnmounted` | `onUnmounted()` |
+| **Solid** | `onMount`, `onCleanup` | `onCleanup()` |
 
 ## Próximos passos
 
-- [Roteamento](/roteamento/conceitos/) - Lifecycle com navegação de rotas
+- [Roteamento](/roteamento/conceitos/) - Navegação de rotas
 - [Error Handling](/error-handling/error-boundary/) - Tratamento de erros em componentes
-- [SSR](/ssr/renderizacao/) - Lifecycle no server-side rendering
+- [SSR](/avancado/ssr/) - Renderização no servidor
