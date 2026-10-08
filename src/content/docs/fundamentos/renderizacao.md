@@ -360,12 +360,12 @@ Todos os eventos DOM padrão são suportados:
 const element = html`
   <input
     type="text"
-    oninput=${(e) => console.log(e.target.value)}
-    onchange=${handleChange}
-    onfocus=${handleFocus}
-    onblur=${handleBlur}
-    onkeydown=${handleKeyDown}
-    onkeyup=${handleKeyUp}
+    onInput=${(e) => console.log(e.target.value)}
+    onChange=${handleChange}
+    onFocus=${handleFocus}
+    onBlur=${handleBlur}
+    onKeyDown=${handleKeyDown}
+    onKeyUp=${handleKeyUp}
   />
 `
 ```
@@ -382,7 +382,7 @@ const handleClick = (event: MouseEvent) => {
 }
 
 const button = html`
-  <button onclick=${handleClick}>Click Me</button>
+  <button onClick=${handleClick}>Click Me</button>
 `
 ```
 
@@ -422,7 +422,7 @@ const handleInput = (e: TextFieldEvent<'input'>) => {
 
 const form = html`
   <form>
-    <input type="text" oninput=${handleInput} />
+    <input type="text" onInput=${handleInput} />
   </form>
 `
 ```
@@ -436,7 +436,7 @@ Event listeners são **automaticamente removidos** quando um nó é destruído:
 ```typescript
 import { destroyNode } from '@_bashell/slash'
 
-const button = html`<button onclick=${handler}>Click</button>`
+const button = html`<button onClick=${handler}>Click</button>`
 
 // Quando não mais necessário
 destroyNode(button as Node) // Remove listener automaticamente

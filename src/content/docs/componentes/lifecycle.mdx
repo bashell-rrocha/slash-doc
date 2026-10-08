@@ -144,7 +144,12 @@ O mesmo vale para `fetch` com `AbortController`, `WebSocket` e listeners em `win
 Para executar um efeito quando um state muda, use `watch()` fora do componente:
 
 ```typescript
+import { createState } from '@_bashell/slash'
+
+type User = { id: number; name: string }
+
 const userId = createState<number | null>(null)
+const userData = createState<User | null>(null)
 
 userId.watch(async (id) => {
   if (id === null) return

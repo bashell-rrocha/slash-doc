@@ -155,7 +155,7 @@ function Counter() {
   const count = createState(0); // Warning!
 
   return html`
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Count: ${count.get()}
     </button>
   `;
@@ -166,7 +166,7 @@ const count = createState(0);
 
 function Counter() {
   return html`
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Count: ${count.get()}
     </button>
   `;
