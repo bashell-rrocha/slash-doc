@@ -1,0 +1,633 @@
+---
+title: Todo App Completo (CSR)
+description: Exemplo prático de um Todo App completo usando Slash no client-side
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+# Todo App Completo (CSR)
+
+Este exemplo demonstra como criar uma aplicação Todo completa usando Slash no modo Client-Side Rendering (CSR). Você aprenderá sobre gerenciamento de estado, manipulação de eventos, renderização condicional e melhores práticas.
+
+## Funcionalidades
+
+- ✅ Adicionar, editar e remover tarefas
+- ✅ Marcar tarefas como concluídas
+- ✅ Filtrar tarefas (Todas, Ativas, Concluídas)
+- ✅ Contador de tarefas ativas
+- ✅ Limpar tarefas concluídas
+- ✅ Persistência no localStorage
+
+## Estrutura do Projeto
+
+```
+src/
+├── index.ts          # Entry point e renderização
+├── components/
+│   ├── TodoApp.ts    # Componente principal
+│   ├── TodoItem.ts   # Item individual
+│   └── TodoFilters.ts # Filtros
+├── state/
+│   └── todoState.ts  # Estado global
+└── types.ts          # Tipos TypeScript
+```
+
+## Tipos TypeScript
+
+Primeiro, vamos definir os tipos da nossa aplicação:
+
+```typescript title="src/types.ts"
+export interface Todo {
+  id: string
+  text: string
+  completed: boolean
+  createdAt: number
+}
+
+export type Filter = 'all' | 'active' | 'completed'
+
+export interface TodoState {
+  todos: Todo[]
+  filter: Filter
+}
+```
+
+## Estado Global
+
+Criamos o estado reativo usando `createState`:
+
+```typescript title="src/state/todoState.ts" {5-8}
+import { createState } from '@_bashell/slash'
+import type { TodoState, Todo, Filter } from '../types'
+
+// Carrega estado do localStorage se existir
+const loadState = (): TodoState => {
+  const saved = localStorage.getItem('slash-todos')
+  if (saved) {
+    try {
+      return JSON.parse(saved)
+    } catch (e) {
+      console.error('Failed to load todos:', e)
+    }
+  }
+  return { todos: [], filter: 'all' }
+}
+
+// Cria estado reativo com histórico para debug
+export const todoState = createState<TodoState>(loadState(), {
+  history: true,
+  maxHistory: 50
+})
+
+// Salva no localStorage sempre que mudar
+todoState.watch((state) => {
+  localStorage.setItem('slash-todos', JSON.stringify(state))
+})
+
+// Actions
+export const addTodo = (text: string): void => {
+  const state = todoState.get()
+  const newTodo: Todo = {
+    id: crypto.randomUUID(),
+    text: text.trim(),
+    completed: false,
+    createdAt: Date.now()
+  }
+
+  todoState.set({
+    ...state,
+    todos: [...state.todos, newTodo]
+  })
+}
+
+export const toggleTodo = (id: string): void => {
+  const state = todoState.get()
+  todoState.set({
+    ...state,
+    todos: state.todos.map(todo =>
+      todo.id === id ? { ...todo, completed: !todo.completed } : todo
+    )
+  })
+}
+
+export const deleteTodo = (id: string): void => {
+  const state = todoState.get()
+  todoState.set({
+    ...state,
+    todos: state.todos.filter(todo => todo.id !== id)
+  })
+}
+
+export const editTodo = (id: string, text: string): void => {
+  const state = todoState.get()
+  todoState.set({
+    ...state,
+    todos: state.todos.map(todo =>
+      todo.id === id ? { ...todo, text: text.trim() } : todo
+    )
+  })
+}
+
+export const clearCompleted = (): void => {
+  const state = todoState.get()
+  todoState.set({
+    ...state,
+    todos: state.todos.filter(todo => !todo.completed)
+  })
+}
+
+export const setFilter = (filter: Filter): void => {
+  const state = todoState.get()
+  todoState.set({ ...state, filter })
+}
+
+// Computed values
+export const getFilteredTodos = (): Todo[] => {
+  const state = todoState.get()
+  switch (state.filter) {
+    case 'active':
+      return state.todos.filter(t => !t.completed)
+    case 'completed':
+      return state.todos.filter(t => t.completed)
+    default:
+      return state.todos
+  }
+}
+
+export const getActiveCount = (): number => {
+  return todoState.get().todos.filter(t => !t.completed).length
+}
+
+export const getCompletedCount = (): number => {
+  return todoState.get().todos.filter(t => t.completed).length
+}
+```
+
+<Aside type="tip">
+Usando `history: true` no estado, você pode debugar facilmente usando as ferramentas de desenvolvimento do navegador e até implementar undo/redo.
+</Aside>
+
+## Componente TodoItem
+
+Componente que representa cada tarefa individual:
+
+```typescript title="src/components/TodoItem.ts"
+import { html, type VNode } from '@_bashell/slash'
+import type { Todo } from '../types'
+import { toggleTodo, deleteTodo, editTodo } from '../state/todoState'
+
+interface TodoItemProps {
+  todo: Todo
+}
+
+export const TodoItem = ({ todo }: TodoItemProps): VNode => {
+  let isEditing = false
+  let editInput: HTMLInputElement | null = null
+
+  const handleEdit = () => {
+    isEditing = true
+    // Re-render será feito pelo watch no componente pai
+    setTimeout(() => {
+      editInput?.focus()
+      editInput?.select()
+    }, 0)
+  }
+
+  const handleSave = () => {
+    if (editInput && editInput.value.trim()) {
+      editTodo(todo.id, editInput.value)
+    }
+    isEditing = false
+  }
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSave()
+    } else if (e.key === 'Escape') {
+      isEditing = false
+      // Re-render
+    }
+  }
+
+  return html`
+    <li class=${`todo-item ${todo.completed ? 'completed' : ''} ${isEditing ? 'editing' : ''}`}>
+      ${!isEditing ? html`
+        <div class="view">
+          <input
+            class="toggle"
+            type="checkbox"
+            checked=${todo.completed}
+            onchange=${() => toggleTodo(todo.id)}
+          />
+          <label ondblclick=${handleEdit}>
+            ${todo.text}
+          </label>
+          <button
+            class="destroy"
+            onclick=${() => deleteTodo(todo.id)}
+          >×</button>
+        </div>
+      ` : html`
+        <input
+          class="edit"
+          type="text"
+          value=${todo.text}
+          onblur=${handleSave}
+          onkeydown=${handleKeyDown}
+          ref=${(el: HTMLInputElement) => { editInput = el }}
+        />
+      `}
+    </li>
+  `
+}
+```
+
+## Componente TodoFilters
+
+Filtros para visualizar diferentes subconjuntos de tarefas:
+
+```typescript title="src/components/TodoFilters.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { todoState, setFilter, clearCompleted, getActiveCount, getCompletedCount } from '../state/todoState'
+import type { Filter } from '../types'
+
+export const TodoFilters = (): VNode => {
+  const state = todoState.get()
+  const activeCount = getActiveCount()
+  const completedCount = getCompletedCount()
+
+  const renderFilter = (filter: Filter, label: string) => html`
+    <li>
+      <button
+        class=${state.filter === filter ? 'selected' : ''}
+        onclick=${() => setFilter(filter)}
+      >
+        ${label}
+      </button>
+    </li>
+  `
+
+  return html`
+    <footer class="footer">
+      <span class="todo-count">
+        <strong>${activeCount}</strong>
+        ${activeCount === 1 ? ' item' : ' items'} left
+      </span>
+
+      <ul class="filters">
+        ${renderFilter('all', 'All')}
+        ${renderFilter('active', 'Active')}
+        ${renderFilter('completed', 'Completed')}
+      </ul>
+
+      ${completedCount > 0 ? html`
+        <button
+          class="clear-completed"
+          onclick=${clearCompleted}
+        >
+          Clear completed
+        </button>
+      ` : null}
+    </footer>
+  `
+}
+```
+
+## Componente TodoApp
+
+Componente principal que coordena toda a aplicação:
+
+```typescript title="src/components/TodoApp.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { todoState, addTodo, getFilteredTodos } from '../state/todoState'
+import { TodoItem } from './TodoItem'
+import { TodoFilters } from './TodoFilters'
+
+export const TodoApp = (): VNode => {
+  let inputRef: HTMLInputElement | null = null
+
+  const handleSubmit = (e: Event) => {
+    e.preventDefault()
+    if (inputRef && inputRef.value.trim()) {
+      addTodo(inputRef.value)
+      inputRef.value = ''
+    }
+  }
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSubmit(e)
+    }
+  }
+
+  // Re-render quando o estado mudar
+  let container: HTMLElement | null = null
+
+  todoState.watch(() => {
+    if (container) {
+      const newVNode = TodoApp()
+      container.replaceWith(newVNode as any)
+    }
+  })
+
+  const filteredTodos = getFilteredTodos()
+  const state = todoState.get()
+
+  return html`
+    <section class="todoapp" ref=${(el: HTMLElement) => { container = el }}>
+      <header class="header">
+        <h1>todos</h1>
+        <input
+          class="new-todo"
+          placeholder="What needs to be done?"
+          ref=${(el: HTMLInputElement) => { inputRef = el }}
+          onkeydown=${handleKeyDown}
+          autofocus
+        />
+      </header>
+
+      ${state.todos.length > 0 ? html`
+        <section class="main">
+          <ul class="todo-list">
+            ${filteredTodos.map(todo => TodoItem({ todo }))}
+          </ul>
+        </section>
+
+        ${TodoFilters()}
+      ` : null}
+    </section>
+  `
+}
+```
+
+<Aside type="note">
+O padrão usado aqui é re-renderizar toda a app quando o estado muda. Para apps maiores, você pode otimizar usando `batch()` e renderização mais granular.
+</Aside>
+
+## Entry Point
+
+Montamos a aplicação no DOM:
+
+```typescript title="src/index.ts"
+import { render } from '@_bashell/slash'
+import { TodoApp } from './components/TodoApp'
+import './styles.css'
+
+// Render app
+const root = document.getElementById('app')
+if (root) {
+  render(TodoApp(), root)
+}
+```
+
+## Estilos CSS
+
+CSS básico seguindo o padrão TodoMVC:
+
+```css title="src/styles.css"
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.4em;
+  background: #f5f5f5;
+  color: #4d4d4d;
+  min-width: 230px;
+  max-width: 550px;
+  margin: 0 auto;
+  font-weight: 300;
+}
+
+.todoapp {
+  background: #fff;
+  margin: 130px 0 40px 0;
+  position: relative;
+  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.2),
+              0 25px 50px 0 rgba(0, 0, 0, 0.1);
+}
+
+.header h1 {
+  position: absolute;
+  top: -155px;
+  width: 100%;
+  font-size: 100px;
+  font-weight: 100;
+  text-align: center;
+  color: rgba(175, 47, 47, 0.15);
+  margin: 0;
+}
+
+.new-todo {
+  padding: 16px 16px 16px 60px;
+  border: none;
+  background: rgba(0, 0, 0, 0.003);
+  box-shadow: inset 0 -2px 1px rgba(0,0,0,0.03);
+  width: 100%;
+  font-size: 24px;
+  font-family: inherit;
+  font-weight: inherit;
+  line-height: 1.4em;
+}
+
+.todo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-item {
+  position: relative;
+  font-size: 24px;
+  border-bottom: 1px solid #ededed;
+}
+
+.todo-item .view {
+  display: flex;
+  align-items: center;
+  padding: 15px;
+}
+
+.todo-item .toggle {
+  width: 40px;
+  height: 40px;
+  margin-right: 15px;
+  cursor: pointer;
+}
+
+.todo-item label {
+  flex: 1;
+  word-break: break-all;
+  padding: 15px;
+  display: block;
+  line-height: 1.2;
+  transition: color 0.4s;
+  cursor: pointer;
+}
+
+.todo-item.completed label {
+  color: #d9d9d9;
+  text-decoration: line-through;
+}
+
+.todo-item .destroy {
+  width: 40px;
+  height: 40px;
+  font-size: 30px;
+  color: #cc9a9a;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s ease-out;
+}
+
+.todo-item .destroy:hover {
+  color: #af5b5e;
+}
+
+.todo-item .edit {
+  width: 100%;
+  padding: 12px 16px;
+  margin: 0;
+  font-size: 24px;
+  font-family: inherit;
+  font-weight: inherit;
+  line-height: 1.4em;
+  border: 1px solid #999;
+  box-shadow: inset 0 -1px 5px 0 rgba(0, 0, 0, 0.2);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  height: 40px;
+  text-align: center;
+  border-top: 1px solid #e6e6e6;
+}
+
+.todo-count {
+  text-align: left;
+}
+
+.filters {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 5px;
+}
+
+.filters button {
+  color: inherit;
+  padding: 3px 7px;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.filters button:hover {
+  border-color: rgba(175, 47, 47, 0.1);
+}
+
+.filters button.selected {
+  border-color: rgba(175, 47, 47, 0.2);
+}
+
+.clear-completed {
+  color: inherit;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.clear-completed:hover {
+  text-decoration: underline;
+}
+```
+
+## HTML Base
+
+```html title="index.html"
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slash Todo App</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/index.ts"></script>
+</body>
+</html>
+```
+
+## Executando o Projeto
+
+<Tabs>
+  <TabItem label="bun">
+  ```bash
+  # Instalar dependências
+  bun install
+
+  # Desenvolvimento
+  bun run dev
+
+  # Build
+  bun run build
+  ```
+  </TabItem>
+
+  <TabItem label="npm">
+  ```bash
+  # Instalar dependências
+  npm install
+
+  # Desenvolvimento
+  npm run dev
+
+  # Build
+  npm run build
+  ```
+  </TabItem>
+</Tabs>
+
+## Melhorias Possíveis
+
+Aqui estão algumas melhorias que você pode implementar:
+
+1. **Drag and Drop**: Permitir reordenar tarefas arrastando
+2. **Categorias/Tags**: Adicionar categorias às tarefas
+3. **Data de Vencimento**: Adicionar datas limite
+4. **Prioridades**: Sistema de priorização (alta, média, baixa)
+5. **Busca**: Filtrar tarefas por texto
+6. **Temas**: Dark mode e customização de cores
+7. **Atalhos de Teclado**: Navegação e ações via teclado
+8. **Animações**: Transições suaves ao adicionar/remover
+9. **Sincronização**: Salvar em backend/cloud
+10. **Undo/Redo**: Usar o histórico do estado para implementar
+
+## Pontos-Chave de Aprendizado
+
+1. **Estado Centralizado**: Todo o estado da aplicação em um único lugar facilita debugging e manutenção
+2. **Reatividade**: O `watch()` permite que a UI se atualize automaticamente quando o estado muda
+3. **Persistência**: Salvar no localStorage é simples com watchers
+4. **Separação de Concerns**: Estado, componentes e tipos bem separados
+5. **TypeScript**: Tipos garantem segurança em toda a aplicação
+6. **Performance**: Para apps maiores, considere `batch()` para otimizar updates múltiplos
+
+## Próximos Passos
+
+- [Blog com SSR](/exemplos/blog-ssr/) - Aprenda sobre Server-Side Rendering
+- [SPA com Roteamento](/exemplos/spa-routing/) - Navegação entre páginas
+- [API Reference](/referencia/api/) - Documentação completa da API

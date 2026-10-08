@@ -1,0 +1,938 @@
+---
+title: API Reference
+description: Documentação completa da API do Slash com todas as funções, tipos e assinaturas TypeScript
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+# API Reference
+
+Documentação completa de todas as funções, componentes e tipos exportados pelo Slash.
+
+## Instalação
+
+```bash
+bun add @_bashell/slash
+# ou
+npm install @_bashell/slash
+```
+
+---
+
+## Renderização
+
+### `h()`
+
+Cria elementos DOM usando hyperscript.
+
+```typescript
+function h(
+  tag: string | Function,
+  props?: Props | null,
+  ...children: Child[]
+): VNode
+```
+
+**Parâmetros:**
+- `tag`: Nome da tag HTML ou componente funcional
+- `props`: Propriedades do elemento (opcional)
+- `children`: Filhos do elemento (podem ser strings, números, VNodes, arrays)
+
+**Retorna:** `VNode` - Representação virtual do elemento
+
+**Exemplo:**
+```typescript
+import { h } from '@_bashell/slash'
+
+const element = h('div', { class: 'container' },
+  h('h1', null, 'Hello'),
+  h('p', null, 'World')
+)
+```
+
+---
+
+### `html`
+
+Template tag que converte template strings em VNodes usando HTM.
+
+```typescript
+const html: HTMTemplate
+```
+
+**Uso:**
+```typescript
+import { html } from '@_bashell/slash'
+
+const element = html`
+  <div class="container">
+    <h1>Hello</h1>
+    <p>World</p>
+  </div>
+`
+```
+
+**Interpolação:**
+```typescript
+const name = 'John'
+const items = ['a', 'b', 'c']
+
+const element = html`
+  <div>
+    <h1>Hello ${name}</h1>
+    <ul>
+      ${items.map(item => html`<li>${item}</li>`)}
+    </ul>
+  </div>
+`
+```
+
+<Aside type="tip">
+`html` é um alias para HTM e oferece uma sintaxe mais familiar que se parece com JSX.
+</Aside>
+
+---
+
+### `render()`
+
+Monta um VNode no DOM.
+
+```typescript
+function render(
+  vnode: VNode,
+  container: HTMLElement
+): void
+```
+
+**Parâmetros:**
+- `vnode`: VNode para renderizar
+- `container`: Elemento DOM onde montar
+
+**Exemplo:**
+```typescript
+import { html, render } from '@_bashell/slash'
+
+const App = html`<h1>My App</h1>`
+const root = document.getElementById('app')
+
+if (root) {
+  render(App, root)
+}
+```
+
+---
+
+### `destroyNode()`
+
+Remove um nó do DOM e limpa recursos.
+
+```typescript
+function destroyNode(element: HTMLElement): void
+```
+
+**Parâmetros:**
+- `element`: Elemento DOM para destruir
+
+**Uso:**
+```typescript
+import { destroyNode } from '@_bashell/slash'
+
+const element = document.getElementById('my-component')
+if (element) {
+  destroyNode(element)
+}
+```
+
+---
+
+## Estado Reativo
+
+### `createState()`
+
+Cria um estado reativo com observadores.
+
+```typescript
+function createState<T>(
+  initialValue: T,
+  options?: StateOptions
+): State<T>
+```
+
+**Parâmetros:**
+- `initialValue`: Valor inicial do estado
+- `options`: Opções de configuração (opcional)
+
+**Opções:**
+```typescript
+interface StateOptions {
+  history?: boolean      // Habilita histórico (time-travel debug)
+  maxHistory?: number    // Número máximo de histórico (padrão: 50)
+}
+```
+
+**Retorna:** Objeto `State<T>` com métodos:
+
+#### `state.get()`
+
+Retorna o valor atual do estado.
+
+```typescript
+get(): T
+```
+
+**Exemplo:**
+```typescript
+const count = createState(0)
+console.log(count.get()) // 0
+```
+
+#### `state.set()`
+
+Atualiza o valor do estado e notifica observadores.
+
+```typescript
+set(newValue: T): void
+```
+
+**Exemplo:**
+```typescript
+const count = createState(0)
+count.set(5)
+console.log(count.get()) // 5
+```
+
+<Aside type="note">
+`set()` faz deep cloning automático para garantir imutabilidade. Use `batch()` para múltiplas atualizações.
+</Aside>
+
+#### `state.watch()`
+
+Registra um observador que é chamado quando o estado muda.
+
+```typescript
+watch(callback: (newValue: T, oldValue: T) => void): () => void
+```
+
+**Parâmetros:**
+- `callback`: Função chamada ao mudar estado
+
+**Retorna:** Função de cleanup para remover o observador
+
+**Exemplo:**
+```typescript
+const count = createState(0)
+
+const unwatch = count.watch((newVal, oldVal) => {
+  console.log(`Changed from ${oldVal} to ${newVal}`)
+})
+
+count.set(5) // Logs: "Changed from 0 to 5"
+
+// Remover observador
+unwatch()
+```
+
+**Exemplo Completo:**
+```typescript
+import { createState, html } from '@_bashell/slash'
+
+const count = createState(0, { history: true })
+
+// Componente que usa estado
+const Counter = () => {
+  const value = count.get()
+
+  return html`
+    <div>
+      <p>Count: ${value}</p>
+      <button onclick=${() => count.set(value + 1)}>
+        Increment
+      </button>
+    </div>
+  `
+}
+```
+
+---
+
+### `batch()`
+
+Agrupa múltiplas atualizações de estado em um único ciclo de renderização.
+
+```typescript
+function batch(fn: () => void): void
+```
+
+**Parâmetros:**
+- `fn`: Função que contém as atualizações
+
+**Exemplo:**
+```typescript
+import { createState, batch } from '@_bashell/slash'
+
+const name = createState('')
+const age = createState(0)
+
+// Sem batch: 2 renders
+name.set('John')
+age.set(30)
+
+// Com batch: 1 render
+batch(() => {
+  name.set('John')
+  age.set(30)
+})
+```
+
+<Aside type="tip">
+Use `batch()` sempre que atualizar múltiplos estados relacionados para melhor performance.
+</Aside>
+
+---
+
+## Server-Side Rendering
+
+### `renderToString()`
+
+Renderiza um VNode para string HTML (síncrono).
+
+```typescript
+function renderToString(vnode: VNode): string
+```
+
+**Parâmetros:**
+- `vnode`: VNode para renderizar
+
+**Retorna:** String HTML
+
+**Exemplo:**
+```typescript
+import { html, renderToString } from '@_bashell/slash'
+
+const App = html`<h1>Hello SSR</h1>`
+const htmlString = renderToString(App)
+
+console.log(htmlString) // "<h1>Hello SSR</h1>"
+```
+
+---
+
+### `renderToStream()`
+
+Renderiza um VNode para stream (para grandes páginas).
+
+```typescript
+function renderToStream(vnode: VNode): ReadableStream
+```
+
+**Parâmetros:**
+- `vnode`: VNode para renderizar
+
+**Retorna:** `ReadableStream` que pode ser pipeado
+
+**Exemplo (Node.js):**
+```typescript
+import { html, renderToStream } from '@_bashell/slash'
+import { Writable } from 'stream'
+
+const App = html`<h1>Hello Streaming</h1>`
+const stream = renderToStream(App)
+
+response.writeHead(200, { 'Content-Type': 'text/html' })
+stream.pipe(response)
+```
+
+---
+
+### `htmlString`
+
+Template tag para criar strings HTML seguras com escapamento.
+
+```typescript
+const htmlString: (strings: TemplateStringsArray, ...values: any[]) => string
+```
+
+**Uso:**
+```typescript
+import { htmlString } from '@_bashell/slash'
+
+const title = 'My Page'
+const html = htmlString`
+  <!DOCTYPE html>
+  <html>
+    <head><title>${title}</title></head>
+    <body>
+      <div id="app"></div>
+    </body>
+  </html>
+`
+```
+
+<Aside type="caution">
+`htmlString` escapa automaticamente valores interpolados para prevenir XSS.
+</Aside>
+
+---
+
+## Universal Data Loading
+
+### `createLoader()`
+
+Cria um loader isomórfico para data fetching.
+
+```typescript
+function createLoader<T, Args extends any[] = []>(
+  fetchFn: (...args: Args) => T | Promise<T>,
+  options?: LoaderOptions
+): LoaderFunction<T, Args>
+```
+
+**Parâmetros:**
+- `fetchFn`: Função que carrega os dados
+- `options`: Configurações do loader
+
+**Opções:**
+```typescript
+interface LoaderOptions {
+  ttl?: number                              // Tempo de vida do cache (ms)
+  key?: (...args: any[]) => string         // Função para gerar chave de cache
+  onError?: (error: Error) => void         // Callback de erro
+  staleWhileRevalidate?: boolean           // Retorna cache stale enquanto revalida
+}
+```
+
+**Retorna:** Função loader que pode ser chamada para carregar dados
+
+**Exemplo:**
+```typescript
+import { createLoader } from '@_bashell/slash'
+
+interface User {
+  id: string
+  name: string
+}
+
+const userLoader = createLoader<User>(
+  async (id: string) => {
+    const res = await fetch(`/api/users/${id}`)
+    return res.json()
+  },
+  {
+    ttl: 5 * 60 * 1000, // 5 minutos
+    key: (id) => `user:${id}`
+  }
+)
+
+// Uso
+const user = userLoader('123') // Carrega e cacheia
+const sameUser = userLoader('123') // Retorna do cache
+```
+
+---
+
+### `invalidateLoader()`
+
+Invalida o cache de um loader.
+
+```typescript
+function invalidateLoader<T, Args extends any[]>(
+  loader: LoaderFunction<T, Args>,
+  ...args: Args
+): void
+```
+
+**Parâmetros:**
+- `loader`: Loader para invalidar
+- `args`: Argumentos para gerar a chave (opcional)
+
+**Exemplo:**
+```typescript
+import { invalidateLoader } from '@_bashell/slash'
+
+// Invalida cache específico
+invalidateLoader(userLoader, '123')
+
+// Invalida todo o cache do loader
+invalidateLoader(userLoader)
+```
+
+---
+
+### `hydrateLoaderCache()`
+
+Obtém o cache de loaders para hidratação no cliente.
+
+```typescript
+function hydrateLoaderCache(): Record<string, any>
+```
+
+**Retorna:** Objeto com cache de todos os loaders
+
+**Exemplo (Servidor):**
+```typescript
+import { hydrateLoaderCache } from '@_bashell/slash'
+
+const cache = hydrateLoaderCache()
+
+const html = htmlString`
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <script>
+        window.__LOADER_CACHE__ = ${JSON.stringify(cache)};
+      </script>
+    </head>
+    <body>...</body>
+  </html>
+`
+```
+
+---
+
+### `isServer()`
+
+Detecta se o código está rodando no servidor.
+
+```typescript
+function isServer(): boolean
+```
+
+**Retorna:** `true` se no servidor, `false` no cliente
+
+**Exemplo:**
+```typescript
+import { isServer } from '@_bashell/slash'
+
+if (isServer()) {
+  // Código apenas para servidor
+  console.log('Running on server')
+} else {
+  // Código apenas para cliente
+  console.log('Running on client')
+}
+```
+
+---
+
+## Roteamento
+
+### `createRouter()`
+
+Cria uma instância de router.
+
+```typescript
+function createRouter(config: RouterConfig): Router
+```
+
+**Configuração:**
+```typescript
+interface RouterConfig {
+  mode?: 'hash' | 'history'              // Modo de navegação (padrão: 'hash')
+  routes: RouteConfig[]                   // Definição de rotas
+  scrollBehavior?: (to, from) => ScrollPosition
+  beforeEach?: (to, from) => boolean | { redirect: string }
+  afterEach?: (to, from) => void
+}
+
+interface RouteConfig {
+  path: string                            // Caminho da rota
+  component: () => VNode | Promise<VNode> // Componente (pode ser lazy)
+  beforeEnter?: (to, from) => boolean | { redirect: string }
+  meta?: Record<string, any>              // Metadados customizados
+}
+```
+
+**Exemplo:**
+```typescript
+import { createRouter } from '@_bashell/slash'
+
+const router = createRouter({
+  mode: 'history',
+  routes: [
+    {
+      path: '/',
+      component: () => import('./pages/Home')
+    },
+    {
+      path: '/users/:id',
+      component: () => import('./pages/UserDetail'),
+      meta: { requiresAuth: true }
+    }
+  ],
+  beforeEach: (to, from) => {
+    console.log(`Navigating to ${to.path}`)
+    return true
+  }
+})
+
+router.init()
+```
+
+---
+
+### `Router` Component
+
+Componente que renderiza a rota atual.
+
+```typescript
+function Router(props: { router: Router }): VNode
+```
+
+**Uso:**
+```typescript
+import { html, Router } from '@_bashell/slash'
+import { router } from './router'
+
+const App = html`
+  <div>
+    <nav>...</nav>
+    ${Router({ router })}
+  </div>
+`
+```
+
+---
+
+### `Link` Component
+
+Componente para navegação client-side.
+
+```typescript
+function Link(props: LinkProps): VNode
+
+interface LinkProps {
+  to: string | { path: string; query?: Record<string, string> }
+  class?: string
+  activeClass?: string
+  children: Child | Child[]
+}
+```
+
+**Uso:**
+```typescript
+import { Link } from '@_bashell/slash'
+
+const Nav = html`
+  <nav>
+    ${Link({ to: '/', children: 'Home' })}
+    ${Link({ to: '/about', children: 'About' })}
+    ${Link({
+      to: { path: '/users', query: { page: '1' } },
+      children: 'Users'
+    })}
+  </nav>
+`
+```
+
+---
+
+### Router Instance Methods
+
+#### `router.push()`
+
+Navega para uma rota programaticamente.
+
+```typescript
+push(location: string | { path: string; query?: Record<string, string> }): void
+```
+
+**Exemplo:**
+```typescript
+router.push('/about')
+router.push({ path: '/users', query: { page: '2' } })
+```
+
+#### `router.replace()`
+
+Substitui a rota atual (não adiciona ao histórico).
+
+```typescript
+replace(location: string | { path: string; query?: Record<string, string> }): void
+```
+
+#### `router.back()`
+
+Volta uma página no histórico.
+
+```typescript
+back(): void
+```
+
+#### `router.forward()`
+
+Avança uma página no histórico.
+
+```typescript
+forward(): void
+```
+
+#### `router.go()`
+
+Navega n páginas no histórico.
+
+```typescript
+go(n: number): void
+```
+
+**Exemplo:**
+```typescript
+router.go(-2) // Volta 2 páginas
+router.go(1)  // Avança 1 página
+```
+
+#### `router.getCurrentRoute()`
+
+Retorna a rota atual.
+
+```typescript
+getCurrentRoute(): RouteInfo | null
+
+interface RouteInfo {
+  path: string
+  params: Record<string, string>
+  query: Record<string, string>
+  meta: Record<string, any>
+}
+```
+
+---
+
+## Error Handling
+
+### `ErrorBoundary`
+
+Componente para capturar erros em componentes filhos.
+
+```typescript
+function ErrorBoundary(props: ErrorBoundaryProps): VNode
+
+interface ErrorBoundaryProps {
+  fallback?: (error: Error) => VNode
+  onError?: (error: Error) => void
+  children: VNode | VNode[]
+}
+```
+
+**Exemplo:**
+```typescript
+import { ErrorBoundary, html } from '@_bashell/slash'
+
+const App = html`
+  ${ErrorBoundary({
+    fallback: (error) => html`
+      <div class="error">
+        <h2>Something went wrong</h2>
+        <p>${error.message}</p>
+      </div>
+    `,
+    onError: (error) => {
+      console.error('Error caught:', error)
+    },
+    children: html`<MyComponent />`
+  })}
+`
+```
+
+---
+
+### `catchAsync()`
+
+Wrapper para funções assíncronas que captura erros.
+
+```typescript
+function catchAsync<T>(
+  fn: () => Promise<T>,
+  onError?: (error: Error) => void
+): Promise<T | null>
+```
+
+**Exemplo:**
+```typescript
+import { catchAsync } from '@_bashell/slash'
+
+const data = await catchAsync(
+  async () => {
+    const res = await fetch('/api/data')
+    return res.json()
+  },
+  (error) => {
+    console.error('Fetch failed:', error)
+  }
+)
+```
+
+---
+
+### `safeRender()`
+
+Renderiza um VNode com tratamento de erro.
+
+```typescript
+function safeRender(
+  vnode: VNode,
+  onError?: (error: Error) => VNode
+): string
+```
+
+**Uso (SSR):**
+```typescript
+import { safeRender } from '@_bashell/slash'
+
+const html = safeRender(
+  App,
+  (error) => html`<h1>Error: ${error.message}</h1>`
+)
+```
+
+---
+
+### `setupGlobalErrorHandler()`
+
+Configura um handler global de erros.
+
+```typescript
+function setupGlobalErrorHandler(
+  handler: (error: Error) => void
+): void
+```
+
+**Exemplo:**
+```typescript
+import { setupGlobalErrorHandler } from '@_bashell/slash'
+
+setupGlobalErrorHandler((error) => {
+  console.error('Global error:', error)
+  // Enviar para serviço de logging
+})
+```
+
+---
+
+## Formulários
+
+### Form Helpers
+
+```typescript
+interface FormHelpers<T> {
+  values: State<T>
+  errors: State<Partial<Record<keyof T, string>>>
+  touched: State<Partial<Record<keyof T, boolean>>>
+  handleSubmit: (e: Event) => void
+  handleChange: (field: keyof T, value: any) => void
+  handleBlur: (field: keyof T) => void
+  reset: () => void
+}
+```
+
+**Exemplo de uso está na seção de [Form Validation](/exemplos/form-validation/)**
+
+---
+
+## Developer Experience
+
+### `setDevMode()`
+
+Habilita/desabilita modo de desenvolvimento.
+
+```typescript
+function setDevMode(enabled: boolean): void
+```
+
+**Exemplo:**
+```typescript
+import { setDevMode } from '@_bashell/slash'
+
+setDevMode(process.env.NODE_ENV === 'development')
+```
+
+---
+
+### `setWarningsEnabled()`
+
+Habilita/desabilita warnings no console.
+
+```typescript
+function setWarningsEnabled(enabled: boolean): void
+```
+
+---
+
+### `isDevMode()`
+
+Verifica se está em modo dev.
+
+```typescript
+function isDevMode(): boolean
+```
+
+---
+
+### `isWarningsEnabled()`
+
+Verifica se warnings estão habilitados.
+
+```typescript
+function isWarningsEnabled(): boolean
+```
+
+---
+
+## Tipos TypeScript
+
+### `VNode`
+
+Representação virtual de um nó DOM.
+
+```typescript
+type VNode = ElementNode | TextNode | ComponentNode
+```
+
+### `Props`
+
+Propriedades de um elemento.
+
+```typescript
+interface Props {
+  [key: string]: any
+  class?: string
+  style?: string | Record<string, string>
+  onclick?: EventHandler
+  onchange?: EventHandler
+  // ... outros event handlers
+}
+```
+
+### `State<T>`
+
+Tipo retornado por `createState()`.
+
+```typescript
+interface State<T> {
+  get(): T
+  set(value: T): void
+  watch(callback: (newValue: T, oldValue: T) => void): () => void
+}
+```
+
+### `Child`
+
+Tipos válidos para children de elementos.
+
+```typescript
+type Child =
+  | VNode
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | Child[]
+```
+
+---
+
+## Próximos Passos
+
+- [Exemplos Práticos](/exemplos/todo-app/) - Aplicações completas
+- [Guias Avançados](/avancado/ssr/) - Técnicas avançadas
+- [Comparações](/referencia/comparacoes/) - Slash vs outras libs
