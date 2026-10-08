@@ -98,12 +98,12 @@ my-slash-app/
 #### src/main.ts
 
 ```typescript
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { App } from './App'
 
 const root = document.getElementById('app')
 if (root) {
-  render(App(), root)
+  render(html`<${App} />`, root)
 }
 ```
 
@@ -116,7 +116,7 @@ import { Counter } from './components/Counter'
 export const App = () => html`
   <div>
     <h1>Welcome to Slash!</h1>
-    ${Counter()}
+    <${Counter} />
   </div>
 `
 ```
@@ -126,18 +126,17 @@ export const App = () => html`
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
-export const Counter = () => {
-  const count = createState(0)
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
-  return html`
-    <div>
-      <p>Count: ${count}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
-        Increment
-      </button>
-    </div>
-  `
-}
+export const Counter = () => html`
+  <div>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
+      Increment
+    </button>
+  </div>
+`
 ```
 
 ### Server-Side Rendering (SSR)

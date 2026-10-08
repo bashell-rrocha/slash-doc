@@ -14,7 +14,7 @@ Slash é uma biblioteca reativa moderna para construção de interfaces de usuá
 
 ### Por que Slash?
 
-Diferente de bibliotecas tradicionais como React ou Vue, Slash não utiliza Virtual DOM para gerenciar atualizações da interface. Em vez disso, usa um sistema de **estado reativo baseado em Observer Pattern** que atualiza apenas os elementos específicos do DOM que dependem do estado alterado.
+Diferente de bibliotecas tradicionais como React ou Vue, Slash não utiliza Virtual DOM para gerenciar atualizações da interface. Em vez disso, usa um sistema de **estado reativo baseado em Observer Pattern**: componentes que leem um state com `get()` re-renderizam quando ele muda, substituindo seus nós no DOM.
 
 **Vantagens:**
 - Zero overhead de diffing do VDOM
@@ -59,28 +59,32 @@ const element = h('div', { class: 'container' },
 O coração do Slash é seu sistema de estado reativo baseado em Observer Pattern:
 
 ```typescript
-import { createState, html } from '@_bashell/slash'
+import { createState, html, render } from '@_bashell/slash'
 
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
 const count = createState(0)
 
 const Counter = () => html`
   <div>
-    <p>Count: ${count}</p>
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Increment
     </button>
   </div>
 `
+
+// Monte como <${Counter} />. render(Counter(), '#app') renderiza uma vez, sem reatividade
+render(html`<${Counter} />`, '#app')
 ```
 
-Quando `count.set()` é chamado, **apenas** os elementos DOM que dependem de `count` são atualizados - sem re-render completo do componente.
+Quando `count.set()` é chamado, os componentes que leram `count.get()` durante a renderização **re-renderizam**: seus nós anteriores são substituídos pelos novos. A granularidade é o componente, não o nó, e não há Virtual DOM nem diff. Passar o próprio state na interpolação (`${count}`) não é reativo: use `${count.get()}` dentro de um componente.
 
 **Arquitetura de Reatividade:** O Slash utiliza `createState()` que retorna objetos `State<T>` com métodos `get()`, `set()` e `watch()`. Esta abordagem combina:
-- **Auto-tracking**: Estados acessados durante renderização são rastreados automaticamente via `globalThis.__SLASH_TRACK_STATE__`
+- **Auto-tracking**: chamadas a `state.get()` feitas enquanto um componente executa registram o state como dependência dele, e o componente re-renderiza quando o state muda
 - **Imutabilidade**: Deep cloning garante que o estado nunca seja mutado acidentalmente
 - **FCIS Pattern**: Lógica pura em `state-core.ts`, side effects em `state.ts`
 - **Batching**: Múltiplas atualizações podem ser agrupadas com `batch()` para uma única notificação
-- **Duck typing**: Sistema detecta qualquer objeto com `get()` e `subscribe()` como reativo
+- **Duck typing**: objetos com `get()` e `subscribe()` (como o `Router`) são reativos como child ou prop. Um `State` tem `get()` e `watch()`, não `subscribe()`, e por isso não é reativo quando interpolado diretamente
 
 ## Quando usar Slash?
 

@@ -11,25 +11,30 @@ Diferente de frameworks como React ou Vue, o Slash **não possui lifecycle hooks
 
 ### Como funciona
 
-1. **Criação**: Componente executa uma vez, retornando um nó DOM
-2. **Reatividade**: Estados reativos atualizam o DOM automaticamente via subscriptions
+1. **Criação**: Ao ser montado como `<${Counter} />`, o componente executa e retorna um nó DOM. Cada `state.get()` chamado nessa execução registra o state como dependência do componente
+2. **Reatividade**: Quando um desses states muda, o componente executa de novo e seus nós anteriores são substituídos pelos novos
 3. **Cleanup**: Quando um nó é removido do DOM, subscriptions são canceladas automaticamente
 
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
-function Counter() {
-  const count = createState(0)
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
-  // ✅ Subscription criada automaticamente quando count é usado no template
+function Counter() {
+  // ✅ Ler count.get() durante a execução inscreve o componente no state
   return html`
     <div>
-      <p>Contador: ${count}</p>
+      <p>Contador: ${count.get()}</p>
       <button onClick=${() => count.set(count.get() + 1)}>+1</button>
     </div>
   `
   // Quando este elemento é removido do DOM, a subscription é limpa automaticamente
 }
+
+// Monte como <${Counter} />. Chamar Counter() diretamente não é reativo
+const app = html`<${Counter} />`
+
 ```
 
 ## Sistema de Cleanup automático
@@ -375,7 +380,7 @@ function FetchComponent({ url }: { url: string }) {
 | **Solid** | ✅ `onMount`, `onCleanup` | ✅ `onCleanup()` |
 
 <Aside type="note">
-A simplicidade do Slash vem de não ter lifecycle complexo - componentes executam uma vez, estados reativos cuidam das atualizações, e cleanup é automático ou explícito via `addCleanup`.
+A simplicidade do Slash vem de não ter lifecycle complexo - componentes re-executam quando um state que leram muda, e a limpeza é automática ou explícita via `addCleanup`, e cleanup é automático ou explícito via `addCleanup`.
 </Aside>
 
 ## Próximos passos
