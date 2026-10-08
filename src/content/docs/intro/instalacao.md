@@ -98,12 +98,12 @@ my-slash-app/
 #### src/main.ts
 
 ```typescript
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { App } from './App'
 
 const root = document.getElementById('app')
 if (root) {
-  render(App(), root)
+  render(html`<${App} />`, root)
 }
 ```
 
@@ -116,7 +116,7 @@ import { Counter } from './components/Counter'
 export const App = () => html`
   <div>
     <h1>Welcome to Slash!</h1>
-    ${Counter()}
+    <${Counter} />
   </div>
 `
 ```
@@ -126,18 +126,17 @@ export const App = () => html`
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
-export const Counter = () => {
-  const count = createState(0)
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
-  return html`
-    <div>
-      <p>Count: ${count}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
-        Increment
-      </button>
-    </div>
-  `
-}
+export const Counter = () => html`
+  <div>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
+      Increment
+    </button>
+  </div>
+`
 ```
 
 ### Server-Side Rendering (SSR)
@@ -161,13 +160,14 @@ my-slash-ssr/
 #### src/server.ts
 
 ```typescript
-import { renderToString } from '@_bashell/slash'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App'
 
 const server = Bun.serve({
   port: 3000,
   async fetch(req) {
-    const html = renderToString(App())
+    // renderToString retorna { html, state }
+    const { html, state } = renderToString(App)
 
     return new Response(`
       <!DOCTYPE html>
@@ -178,11 +178,12 @@ const server = Bun.serve({
       </head>
       <body>
         <div id="app">${html}</div>
+        <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
         <script type="module" src="/client.js"></script>
       </body>
       </html>
     `, {
-      headers: { 'Content-Type': 'text/html' }
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   }
 })
@@ -193,13 +194,14 @@ console.log(`Server running at http://localhost:${server.port}`)
 #### src/client.ts
 
 ```typescript
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { App } from './App'
 
 const root = document.getElementById('app')
 if (root) {
-  // Hydrate existing DOM from server
-  render(App(), root)
+  // Com HTML do servidor + script __SLASH_STATE__ na página, render() limpa o container
+  // e renderiza no cliente (veja Hydration)
+  render(html`<${App} />`, root)
 }
 ```
 
@@ -382,6 +384,10 @@ Saída esperada:
 ✅ HTM working: [object HTMLDivElement]
 ✅ Hyperscript working: [object HTMLDivElement]
 ```
+
+## Segurança
+
+O Slash é seguro por padrão: toda string é escapada, URLs perigosas e handlers que não são função são bloqueados. Leia a página [Segurança](/fundamentos/seguranca/) antes de colocar dado de usuário numa página, e use sempre `serializeStateForScript` para embutir estado em `<script>`.
 
 ## Troubleshooting
 

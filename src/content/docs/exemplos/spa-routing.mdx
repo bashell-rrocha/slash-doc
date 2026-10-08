@@ -9,19 +9,20 @@ import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
 
 # SPA com Roteamento
 
-Este exemplo demonstra como criar uma Single Page Application (SPA) completa usando o sistema de roteamento do Slash. Você aprenderá sobre navegação client-side, route params, guards, lazy loading e transições de página.
+Este exemplo demonstra como criar uma Single Page Application (SPA) usando o roteador do Slash: navegação client-side, route params, query strings, guards e um fallback 404.
 
 ## Funcionalidades
 
 - ✅ Roteamento client-side (SPA)
 - ✅ Navegação com `<Link>` e programática
 - ✅ Route params e query strings
-- ✅ Navigation guards (auth, validação)
-- ✅ Lazy loading de componentes
-- ✅ Transições de página
-- ✅ 404 e tratamento de erros
-- ✅ Hash mode e History mode
-- ✅ Nested routes
+- ✅ Navigation guards (redirecionam com uma string de caminho)
+- ✅ Fallback 404
+- ✅ Hash mode e History mode (em hash mode, links diretos como `/#/products?category=books` funcionam)
+
+<Aside type="note">
+O roteador não oferece lazy loading, data loaders, transições, curingas (`*`) nem hooks `beforeEach`/`afterEach`. Para observar a navegação use `router.watch()`; para o 404 use `fallback`. Veja [Roteamento](/roteamento/conceitos/).
+</Aside>
 
 ## Estrutura do Projeto
 
@@ -31,7 +32,6 @@ src/
 ├── router.ts             # Configuração do router
 ├── pages/
 │   ├── Home.ts           # Página inicial
-│   ├── About.ts          # Sobre
 │   ├── Products.ts       # Lista de produtos
 │   ├── ProductDetail.ts  # Detalhe do produto
 │   ├── Dashboard.ts      # Dashboard (protegido)
@@ -39,8 +39,7 @@ src/
 │   └── NotFound.ts       # 404
 ├── components/
 │   ├── Layout.ts         # Layout base
-│   ├── Header.ts         # Header com navegação
-│   └── PrivateRoute.ts   # HOC para rotas protegidas
+│   └── Header.ts         # Header com navegação
 ├── services/
 │   └── auth.ts           # Serviço de autenticação
 └── types.ts              # Tipos
@@ -77,43 +76,28 @@ export interface RouteParams {
 import { createState } from '@_bashell/slash'
 import type { User } from '../types'
 
-// Estado de autenticação
-export const authState = createState<{
+type AuthState = {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-}>({
-  user: null,
-  isAuthenticated: false,
-  isLoading: true
-})
-
-// Carrega usuário do localStorage ao iniciar
-export const initAuth = (): void => {
-  const savedUser = localStorage.getItem('user')
-  if (savedUser) {
-    try {
-      const user = JSON.parse(savedUser)
-      authState.set({
-        user,
-        isAuthenticated: true,
-        isLoading: false
-      })
-    } catch (e) {
-      authState.set({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false
-      })
-    }
-  } else {
-    authState.set({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false
-    })
-  }
 }
+
+// Lê o usuário salvo de forma síncrona: o guard roda na primeira navegação, que
+// começa assim que o router é criado. O estado precisa estar pronto antes disso.
+const loadSavedAuth = (): AuthState => {
+  try {
+    const saved = localStorage.getItem('user')
+    if (saved) {
+      return { user: JSON.parse(saved) as User, isAuthenticated: true, isLoading: false }
+    }
+  } catch {
+    // JSON inválido ou localStorage indisponível: segue como visitante
+  }
+  return { user: null, isAuthenticated: false, isLoading: false }
+}
+
+// Estado de autenticação (já carregado do localStorage)
+export const authState = createState<AuthState>(loadSavedAuth())
 
 // Login
 export const login = async (email: string, password: string): Promise<void> => {
@@ -155,142 +139,97 @@ export const hasRole = (role: string): boolean => {
 
 ## Configuração do Router
 
-```typescript title="src/router.ts" {8-10,15-20,30-35}
-import { createRouter, type RouteConfig } from '@_bashell/slash'
+<Aside type="note" title="Import circular é seguro aqui">
+`router.ts` importa as páginas, e `Header` e `NotFound` importam `router`. Esse ciclo de módulos ESM funciona porque as páginas só usam `router` **dentro das funções dos componentes**, que rodam depois de todos os módulos terem sido avaliados, nunca no nível superior do módulo. Se alguma página lesse `router` ao ser importada, o resultado seria um erro de acesso antes da inicialização. Para evitar o ciclo por completo, passe o router por props ou crie uma função `getRouter()`.
+</Aside>
+
+As rotas são funções `component(state)` que recebem o `RouterState` (com `params`, `query`, `meta`) e devolvem um template. Cada rota monta a página como componente (`<${Page} />`), para que a página re-renderize quando os states que ela lê mudarem. Guards devolvem `true`/`void` para permitir, `false` para bloquear ou **uma string** com o caminho de redirecionamento:
+
+```typescript title="src/router.ts"
+import { html } from '@_bashell/slash'
+import { createRouter, type NavigationGuard, type RouteConfig } from '@_bashell/slash/router'
 import { authState } from './services/auth'
+import { Home } from './pages/Home'
+import { Products } from './pages/Products'
+import { ProductDetail } from './pages/ProductDetail'
+import { Dashboard } from './pages/Dashboard'
+import { Login } from './pages/Login'
+import { NotFound } from './pages/NotFound'
 
-// Lazy load de páginas
-const Home = () => import('./pages/Home')
-const About = () => import('./pages/About')
-const Products = () => import('./pages/Products')
-const ProductDetail = () => import('./pages/ProductDetail')
-const Dashboard = () => import('./pages/Dashboard')
-const Login = () => import('./pages/Login')
-const NotFound = () => import('./pages/NotFound')
-
-// Guard de autenticação
-const authGuard = async (to: RouteConfig) => {
-  const state = authState.get()
-
-  if (!state.isAuthenticated) {
-    // Redireciona para login
-    return { redirect: '/login', query: { redirect: to.path } }
+// Guard de autenticação: redireciona para /login guardando o destino na query
+const authGuard: NavigationGuard = (to) => {
+  if (!authState.get().isAuthenticated) {
+    return `/login?redirect=${encodeURIComponent(to.path)}`
   }
-
   return true
 }
 
-// Guard de admin
-const adminGuard = async (to: RouteConfig) => {
-  const state = authState.get()
-
-  if (!state.isAuthenticated) {
-    return { redirect: '/login', query: { redirect: to.path } }
-  }
-
-  if (state.user?.role !== 'admin') {
-    return { redirect: '/', error: 'Access denied' }
-  }
-
-  return true
-}
-
-// Configuração de rotas
 const routes: RouteConfig[] = [
-  {
-    path: '/',
-    component: Home,
-    meta: { title: 'Home' }
-  },
-  {
-    path: '/about',
-    component: About,
-    meta: { title: 'About Us' }
-  },
-  {
-    path: '/products',
-    component: Products,
-    meta: { title: 'Products' }
-  },
-  {
-    path: '/products/:id',
-    component: ProductDetail,
-    meta: { title: 'Product Details' }
-  },
+  { path: '/', component: () => html`<${Home} />`, meta: { title: 'Home' } },
+  { path: '/products', component: (state) => html`<${Products} category=${state.query.category ?? 'all'} />`, meta: { title: 'Products' } },
+  { path: '/products/:id', component: (state) => html`<${ProductDetail} id=${state.params.id} />`, meta: { title: 'Product Details' } },
   {
     path: '/dashboard',
-    component: Dashboard,
+    component: () => html`<${Dashboard} />`,
     meta: { title: 'Dashboard', requiresAuth: true },
-    beforeEnter: authGuard
+    guards: [authGuard]
   },
-  {
-    path: '/admin',
-    component: () => import('./pages/Admin'),
-    meta: { title: 'Admin Panel', requiresAuth: true },
-    beforeEnter: adminGuard
-  },
-  {
-    path: '/login',
-    component: Login,
-    meta: { title: 'Login' }
-  },
-  {
-    path: '*',
-    component: NotFound,
-    meta: { title: '404 Not Found' }
-  }
+  { path: '/login', component: (state) => html`<${Login} redirect=${state.query.redirect ?? '/dashboard'} />`, meta: { title: 'Login' } },
+  { path: '/404', component: () => html`<${NotFound} />`, meta: { title: '404 Not Found' } }
 ]
 
-// Cria router
 export const router = createRouter({
-  mode: 'history', // ou 'hash'
+  mode: 'history', // ou 'hash': a URL fica /#/products e a rota inicial vem de location.hash
   routes,
-  scrollBehavior: (to, from) => {
-    // Scroll to top ao navegar
-    return { top: 0, left: 0 }
-  }
+  fallback: '/404' // caminho usado quando nenhuma rota casa
 })
 
-// Global navigation guard
-router.beforeEach((to, from) => {
-  // Atualiza título da página
-  if (to.meta?.title) {
-    document.title = `${to.meta.title} - My SPA`
-  }
-
-  // Log de navegação (analytics)
-  console.log(`Navigating from ${from.path} to ${to.path}`)
-
-  return true
-})
-
-// After navigation hook
-router.afterEach((to, from) => {
-  // Pode usar para fechar modals, resetar estados, etc
-  console.log(`Navigated to ${to.path}`)
+// Observar a navegação: atualiza o título da página
+router.watch((state) => {
+  const title = state.currentRoute?.meta?.title
+  if (title) document.title = `${title} - My SPA`
 })
 ```
 
+### Guards e a URL inicial
+
+O guard também roda na **primeira navegação**, quando o usuário abre `/dashboard` direto pela barra de endereço ou por um link salvo. Enquanto ele decide, o estado do router é `currentRoute: null, isNavigating: true`, então a página protegida **não é renderizada nem aparece por um instante** (sem flash). Depois da decisão vem a rota pedida, o destino do redirect (aqui `/login?redirect=...`) ou, se o guard devolver `false`, `currentRoute: null`: trate esse caso com uma tela vazia ou de erro.
+
+Se você precisar esperar a navegação inicial terminar (por exemplo, para medir ou para só então esconder um splash), use `await router.ready`:
+
+```typescript
+import { router } from './router'
+
+await router.ready // resolve quando a navegação inicial termina (redirects incluídos)
+console.log(router.get().currentRoute?.path)
+```
+
+Cada navegação segue no máximo 10 redirects encadeados, e uma navegação mais nova substitui uma anterior ainda pendente.
+
+<Aside type="caution" title="Guards no cliente são UX, não segurança">
+O guard só decide o que o navegador mostra; qualquer pessoa pode alterar o JavaScript ou chamar a API diretamente. A autorização de verdade precisa acontecer no **servidor** (verifique a sessão em cada requisição da API e nas páginas renderizadas por SSR). No SSR os guards não rodam.
+</Aside>
+
 <Aside type="note">
-Navigation guards são executados antes da navegação. Retorne `false` para cancelar, um objeto com `redirect` para redirecionar, ou `true` para prosseguir.
+As rotas são testadas na ordem em que foram declaradas e vence a primeira que casar. O estado `query` vem da URL: `/products?category=electronics` gera `{ category: 'electronics' }`.
 </Aside>
 
 ## Componente Header
 
-Header com navegação ativa:
+O header lê `authState` e `router` (que é um `State`), então re-renderiza quando o usuário loga ou quando a rota muda. `Link` exige a prop `router`:
 
 ```typescript title="src/components/Header.ts"
-import { html, type VNode } from '@_bashell/slash'
-import { Link, router } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash/router'
+import { router } from '../router'
 import { authState, logout } from '../services/auth'
 
-export const Header = (): VNode => {
+export const Header = () => {
+  // Estes get() inscrevem o componente
   const auth = authState.get()
-  const currentPath = router.getCurrentRoute()?.path || '/'
+  const currentPath = router.get().currentRoute?.path ?? '/'
 
-  const isActive = (path: string): boolean => {
-    return currentPath === path
-  }
+  const isActive = (path: string) => currentPath === path
 
   const handleLogout = () => {
     logout()
@@ -302,35 +241,28 @@ export const Header = (): VNode => {
       <div class="container">
         <nav class="nav">
           <div class="nav-brand">
-            ${Link({ to: '/', children: 'My SPA' })}
+            <${Link} to="/" router=${router}>My SPA<//>
           </div>
 
           <ul class="nav-links">
             <li class=${isActive('/') ? 'active' : ''}>
-              ${Link({ to: '/', children: 'Home' })}
+              <${Link} to="/" router=${router}>Home<//>
             </li>
             <li class=${isActive('/products') ? 'active' : ''}>
-              ${Link({ to: '/products', children: 'Products' })}
-            </li>
-            <li class=${isActive('/about') ? 'active' : ''}>
-              ${Link({ to: '/about', children: 'About' })}
+              <${Link} to="/products" router=${router}>Products<//>
             </li>
 
             ${auth.isAuthenticated ? html`
               <li class=${isActive('/dashboard') ? 'active' : ''}>
-                ${Link({ to: '/dashboard', children: 'Dashboard' })}
+                <${Link} to="/dashboard" router=${router}>Dashboard<//>
               </li>
               <li>
-                <button class="btn-link" onclick=${handleLogout}>
-                  Logout
-                </button>
+                <button class="btn-link" onClick=${handleLogout}>Logout</button>
               </li>
-              <li class="user-info">
-                ${auth.user?.name}
-              </li>
+              <li class="user-info">${auth.user?.name}</li>
             ` : html`
               <li class=${isActive('/login') ? 'active' : ''}>
-                ${Link({ to: '/login', children: 'Login' })}
+                <${Link} to="/login" router=${router}>Login<//>
               </li>
             `}
           </ul>
@@ -344,11 +276,12 @@ export const Header = (): VNode => {
 ## Página Home
 
 ```typescript title="src/pages/Home.ts"
-import { html, type VNode } from '@_bashell/slash'
-import { Link } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash/router'
+import { router } from '../router'
 import { authState } from '../services/auth'
 
-export const Home = (): VNode => {
+export const Home = () => {
   const auth = authState.get()
 
   return html`
@@ -358,52 +291,16 @@ export const Home = (): VNode => {
         <p>A single page application built with Slash</p>
 
         ${auth.isAuthenticated ? html`
-          <p class="welcome">
-            Hello, ${auth.user?.name}!
-          </p>
-          ${Link({
-            to: '/dashboard',
-            class: 'btn btn-primary',
-            children: 'Go to Dashboard'
-          })}
+          <p class="welcome">Hello, ${auth.user?.name}!</p>
+          <${Link} to="/dashboard" router=${router} class="btn btn-primary">Go to Dashboard<//>
         ` : html`
-          ${Link({
-            to: '/login',
-            class: 'btn btn-primary',
-            children: 'Get Started'
-          })}
+          <${Link} to="/login" router=${router} class="btn btn-primary">Get Started<//>
         `}
-      </section>
-
-      <section class="features">
-        <h2>Features</h2>
-        <div class="feature-grid">
-          <div class="feature-card">
-            <h3>🚀 Fast Navigation</h3>
-            <p>Client-side routing for instant page transitions</p>
-          </div>
-          <div class="feature-card">
-            <h3>🔒 Protected Routes</h3>
-            <p>Authentication guards for secure areas</p>
-          </div>
-          <div class="feature-card">
-            <h3>📦 Lazy Loading</h3>
-            <p>Code splitting for optimal performance</p>
-          </div>
-          <div class="feature-card">
-            <h3>🎨 Modern UI</h3>
-            <p>Clean and responsive design</p>
-          </div>
-        </div>
       </section>
 
       <section class="cta">
         <h2>Browse Our Products</h2>
-        ${Link({
-          to: '/products',
-          class: 'btn btn-secondary',
-          children: 'View Products'
-        })}
+        <${Link} to="/products" router=${router} class="btn btn-secondary">View Products<//>
       </section>
     </div>
   `
@@ -412,77 +309,43 @@ export const Home = (): VNode => {
 
 ## Página Products
 
-Lista de produtos com filtros:
+A rota passa o filtro da query como prop. Clicar num filtro navega para a mesma rota com outra query, e o roteador re-renderiza a página:
 
 ```typescript title="src/pages/Products.ts"
-import { html, type VNode, createState } from '@_bashell/slash'
-import { Link, router } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash/router'
+import { router } from '../router'
 import type { Product } from '../types'
 
 // Mock de produtos
-const mockProducts: Product[] = [
-  {
-    id: '1',
-    name: 'Laptop Pro',
-    description: 'High-performance laptop',
-    price: 1299,
-    category: 'electronics',
-    image: '/images/laptop.jpg'
-  },
-  {
-    id: '2',
-    name: 'Wireless Mouse',
-    description: 'Ergonomic wireless mouse',
-    price: 29,
-    category: 'accessories',
-    image: '/images/mouse.jpg'
-  },
-  {
-    id: '3',
-    name: 'Mechanical Keyboard',
-    description: 'RGB mechanical keyboard',
-    price: 149,
-    category: 'accessories',
-    image: '/images/keyboard.jpg'
-  }
+export const mockProducts: Product[] = [
+  { id: '1', name: 'Laptop Pro', description: 'High-performance laptop', price: 1299, category: 'electronics', image: '/images/laptop.jpg' },
+  { id: '2', name: 'Wireless Mouse', description: 'Ergonomic wireless mouse', price: 29, category: 'accessories', image: '/images/mouse.jpg' },
+  { id: '3', name: 'Mechanical Keyboard', description: 'RGB mechanical keyboard', price: 149, category: 'accessories', image: '/images/keyboard.jpg' }
 ]
 
-export const Products = (): VNode => {
-  const query = router.getCurrentRoute()?.query || {}
-  const categoryFilter = query.category || 'all'
+const categories = ['all', 'electronics', 'accessories']
 
-  const filterState = createState(categoryFilter)
+export const Products = ({ category }: { category: string }) => {
+  const filteredProducts = mockProducts.filter(p => category === 'all' || p.category === category)
 
-  const categories = ['all', 'electronics', 'accessories']
-
-  const filteredProducts = mockProducts.filter(p =>
-    filterState.get() === 'all' || p.category === filterState.get()
-  )
-
-  const handleFilterChange = (category: string) => {
-    filterState.set(category)
-    router.push({
-      path: '/products',
-      query: category === 'all' ? {} : { category }
-    })
+  const handleFilterChange = (next: string) => {
+    router.push(next === 'all' ? '/products' : `/products?category=${next}`)
   }
 
   return html`
     <div class="products-page">
       <h1>Our Products</h1>
 
-      <div class="filters">
-        <label>Filter by category:</label>
-        <div class="filter-buttons">
-          ${categories.map(cat => html`
-            <button
-              class=${`filter-btn ${filterState.get() === cat ? 'active' : ''}`}
-              onclick=${() => handleFilterChange(cat)}
-            >
-              ${cat.charAt(0).toUpperCase() + cat.slice(1)}
-            </button>
-          `)}
-        </div>
+      <div class="filter-buttons">
+        ${categories.map(cat => html`
+          <button
+            class=${`filter-btn ${category === cat ? 'active' : ''}`}
+            onClick=${() => handleFilterChange(cat)}
+          >
+            ${cat.charAt(0).toUpperCase() + cat.slice(1)}
+          </button>
+        `)}
       </div>
 
       <div class="products-grid">
@@ -493,21 +356,13 @@ export const Products = (): VNode => {
             <p>${product.description}</p>
             <div class="product-footer">
               <span class="price">$${product.price}</span>
-              ${Link({
-                to: `/products/${product.id}`,
-                class: 'btn btn-sm',
-                children: 'View Details'
-              })}
+              <${Link} to=${`/products/${product.id}`} router=${router} class="btn btn-sm">View Details<//>
             </div>
           </div>
         `)}
       </div>
 
-      ${filteredProducts.length === 0 ? html`
-        <div class="no-products">
-          <p>No products found in this category.</p>
-        </div>
-      ` : null}
+      ${filteredProducts.length === 0 ? html`<p>No products found in this category.</p>` : null}
     </div>
   `
 }
@@ -515,101 +370,41 @@ export const Products = (): VNode => {
 
 ## Página ProductDetail
 
-Detalhe de produto com route params:
+Detalhe de produto com route param (`state.params.id` chega como prop `id`):
 
 ```typescript title="src/pages/ProductDetail.ts"
-import { html, type VNode } from '@_bashell/slash'
-import { router, Link } from '@_bashell/slash'
-import type { Product } from '../types'
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash/router'
+import { router } from '../router'
+import { mockProducts } from './Products'
 
-// Mock (em produção viria de API)
-const mockProducts: Record<string, Product> = {
-  '1': {
-    id: '1',
-    name: 'Laptop Pro',
-    description: 'High-performance laptop with latest specs',
-    price: 1299,
-    category: 'electronics',
-    image: '/images/laptop.jpg'
-  },
-  '2': {
-    id: '2',
-    name: 'Wireless Mouse',
-    description: 'Ergonomic wireless mouse with precision tracking',
-    price: 29,
-    category: 'accessories',
-    image: '/images/mouse.jpg'
-  }
-}
-
-export const ProductDetail = (): VNode => {
-  const route = router.getCurrentRoute()
-  const productId = route?.params?.id
-
-  if (!productId) {
-    return html`
-      <div class="error">
-        <h2>Product not found</h2>
-        ${Link({ to: '/products', children: '← Back to products' })}
-      </div>
-    `
-  }
-
-  const product = mockProducts[productId]
+export const ProductDetail = ({ id }: { id: string }) => {
+  const product = mockProducts.find(p => p.id === id)
 
   if (!product) {
     return html`
       <div class="error">
         <h2>Product not found</h2>
-        ${Link({ to: '/products', children: '← Back to products' })}
+        <${Link} to="/products" router=${router}>← Back to products<//>
       </div>
     `
   }
 
-  const handleAddToCart = () => {
-    alert(`Added ${product.name} to cart!`)
-  }
-
   return html`
     <div class="product-detail">
-      ${Link({
-        to: '/products',
-        class: 'back-link',
-        children: '← Back to products'
-      })}
+      <${Link} to="/products" router=${router} class="back-link">← Back to products<//>
 
       <div class="product-content">
-        <div class="product-image">
-          <img src=${product.image} alt=${product.name} />
-        </div>
-
+        <img src=${product.image} alt=${product.name} />
         <div class="product-info">
           <h1>${product.name}</h1>
-
-          <div class="product-category">
-            Category: ${product.category}
-          </div>
-
-          <p class="product-description">
-            ${product.description}
-          </p>
-
-          <div class="product-price">
-            $${product.price}
-          </div>
-
-          <button
-            class="btn btn-primary btn-lg"
-            onclick=${handleAddToCart}
-          >
+          <div class="product-category">Category: ${product.category}</div>
+          <p class="product-description">${product.description}</p>
+          <div class="product-price">$${product.price}</div>
+          <button class="btn btn-primary" onClick=${() => alert(`Added ${product.name} to cart!`)}>
             Add to Cart
           </button>
         </div>
-      </div>
-
-      <div class="related-products">
-        <h2>Related Products</h2>
-        <p>More products coming soon...</p>
       </div>
     </div>
   `
@@ -618,72 +413,56 @@ export const ProductDetail = (): VNode => {
 
 ## Página Login
 
+O formulário guarda o que o usuário digita fora de qualquer state lido no render (os `<input>` não são recriados a cada tecla). Só `LoginStatus` lê o state do envio:
+
 ```typescript title="src/pages/Login.ts"
-import { html, type VNode, createState, batch } from '@_bashell/slash'
-import { router } from '@_bashell/slash'
+import { html, createState } from '@_bashell/slash'
+import { router } from '../router'
 import { login } from '../services/auth'
 
-export const Login = (): VNode => {
-  const formState = createState({
-    email: '',
-    password: '',
-    isLoading: false,
-    error: ''
-  })
+const status = createState({ isLoading: false, error: '' })
+const draft = { email: '', password: '' }
 
+const LoginStatus = () => {
+  const { isLoading, error } = status.get()
+
+  return html`
+    <div>
+      ${error ? html`<div class="alert alert-error">${error}</div>` : null}
+      <button type="submit" class="btn btn-primary btn-block" disabled=${isLoading}>
+        ${isLoading ? 'Logging in...' : 'Login'}
+      </button>
+    </div>
+  `
+}
+
+export const Login = ({ redirect }: { redirect: string }) => {
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
-    const state = formState.get()
-
-    batch(() => {
-      formState.set({
-        ...state,
-        isLoading: true,
-        error: ''
-      })
-    })
+    status.set({ isLoading: true, error: '' })
 
     try {
-      await login(state.email, state.password)
-
-      // Redireciona para onde o usuário queria ir
-      const redirect = router.getCurrentRoute()?.query?.redirect || '/dashboard'
-      router.push(redirect as string)
+      await login(draft.email, draft.password)
+      // Vai para onde o usuário queria ir; replace evita voltar para o login
+      await router.replace(redirect)
     } catch (error: any) {
-      formState.set({
-        ...formState.get(),
-        isLoading: false,
-        error: error.message || 'Login failed'
-      })
+      status.set({ isLoading: false, error: error.message || 'Login failed' })
     }
   }
-
-  const state = formState.get()
 
   return html`
     <div class="login-page">
       <div class="login-card">
         <h1>Login</h1>
 
-        ${state.error ? html`
-          <div class="alert alert-error">
-            ${state.error}
-          </div>
-        ` : null}
-
-        <form onsubmit=${handleSubmit}>
+        <form onSubmit=${handleSubmit}>
           <div class="form-group">
             <label for="email">Email</label>
             <input
               id="email"
               type="email"
               required
-              value=${state.email}
-              oninput=${(e: Event) => {
-                const target = e.target as HTMLInputElement
-                formState.set({ ...state, email: target.value })
-              }}
-              disabled=${state.isLoading}
+              onInput=${(e: Event) => { draft.email = (e.target as HTMLInputElement).value }}
             />
           </div>
 
@@ -693,27 +472,14 @@ export const Login = (): VNode => {
               id="password"
               type="password"
               required
-              value=${state.password}
-              oninput=${(e: Event) => {
-                const target = e.target as HTMLInputElement
-                formState.set({ ...state, password: target.value })
-              }}
-              disabled=${state.isLoading}
+              onInput=${(e: Event) => { draft.password = (e.target as HTMLInputElement).value }}
             />
           </div>
 
-          <button
-            type="submit"
-            class="btn btn-primary btn-block"
-            disabled=${state.isLoading}
-          >
-            ${state.isLoading ? 'Logging in...' : 'Login'}
-          </button>
+          <${LoginStatus} />
         </form>
 
-        <p class="hint">
-          Use any email and password to login
-        </p>
+        <p class="hint">Use any email and password to login</p>
       </div>
     </div>
   `
@@ -722,11 +488,13 @@ export const Login = (): VNode => {
 
 ## Página Dashboard (Protegida)
 
+A proteção está no guard da rota. A página só lê `authState`:
+
 ```typescript title="src/pages/Dashboard.ts"
-import { html, type VNode } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
 import { authState } from '../services/auth'
 
-export const Dashboard = (): VNode => {
+export const Dashboard = () => {
   const auth = authState.get()
 
   return html`
@@ -738,118 +506,107 @@ export const Dashboard = (): VNode => {
         <p>Email: ${auth.user?.email}</p>
         <p>Role: ${auth.user?.role}</p>
       </div>
-
-      <div class="dashboard-grid">
-        <div class="dashboard-card">
-          <h3>📊 Analytics</h3>
-          <p>View your analytics and insights</p>
-        </div>
-
-        <div class="dashboard-card">
-          <h3>📝 Recent Activity</h3>
-          <p>Track your recent actions</p>
-        </div>
-
-        <div class="dashboard-card">
-          <h3>⚙️ Settings</h3>
-          <p>Manage your account settings</p>
-        </div>
-
-        <div class="dashboard-card">
-          <h3>💬 Messages</h3>
-          <p>Check your messages</p>
-        </div>
-      </div>
     </div>
   `
 }
 ```
 
+## Página NotFound
+
+```typescript title="src/pages/NotFound.ts"
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash/router'
+import { router } from '../router'
+
+export const NotFound = () => html`
+  <div class="not-found">
+    <h1>404</h1>
+    <p>Page not found</p>
+    <${Link} to="/" router=${router}>Go home<//>
+  </div>
+`
+```
+
 ## Layout Principal
 
+O `Router` é usado como componente. O `Header` também é montado como componente (`<${Header} />`) para ter a própria reatividade:
+
 ```typescript title="src/components/Layout.ts"
-import { html, type VNode } from '@_bashell/slash'
-import { Router } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
+import { Router } from '@_bashell/slash/router'
 import { Header } from './Header'
 import { router } from '../router'
 
-export const Layout = (): VNode => {
-  return html`
-    <div class="app">
-      ${Header()}
+export const Layout = () => html`
+  <div class="app">
+    <${Header} />
 
-      <main class="main">
-        <div class="container">
-          ${Router({ router })}
-        </div>
-      </main>
+    <main class="main">
+      <div class="container">
+        <${Router} router=${router} />
+      </div>
+    </main>
 
-      <footer class="footer">
-        <div class="container">
-          <p>&copy; 2026 My SPA. Built with Slash.</p>
-        </div>
-      </footer>
-    </div>
-  `
-}
+    <footer class="footer">
+      <div class="container">
+        <p>&copy; 2026 My SPA. Built with Slash.</p>
+      </div>
+    </footer>
+  </div>
+`
 ```
 
 ## Entry Point
 
 ```typescript title="src/index.ts"
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { Layout } from './components/Layout'
-import { router } from './router'
-import { initAuth } from './services/auth'
 import './styles.css'
 
-// Inicializa autenticação
-initAuth()
-
-// Inicializa router
-router.init()
-
-// Render app
+// O router é criado quando './router' é importado (via Layout) e já começa a
+// navegação inicial pela URL atual (window.location). O estado de autenticação
+// é carregado na criação de `authState`, antes de qualquer guard rodar.
 const root = document.getElementById('app')
 if (root) {
-  render(Layout(), root)
+  render(html`<${Layout} />`, root)
 }
 ```
 
 ## Navegação Programática
 
-Exemplos de navegação via código:
-
 ```typescript
 import { router } from './router'
 
 // Navegação simples
-router.push('/products')
+await router.push('/products')
 
 // Com params
-router.push('/products/123')
+await router.push('/products/123')
 
-// Com query strings
-router.push({
-  path: '/products',
-  query: { category: 'electronics', page: '1' }
-})
+// Com query strings (na própria string)
+await router.push('/products?category=electronics&page=1')
 
-// Voltar
+// Voltar / avançar
 router.back()
-
-// Avançar
 router.forward()
 
 // Ir para índice específico no histórico
 router.go(-2) // volta 2 páginas
 
 // Replace (não adiciona ao histórico)
-router.replace('/login')
+await router.replace('/login')
+
+// Rota atual
+router.currentRoute() // RouteMatch | null
+router.get()          // { currentRoute, params, query, meta, isNavigating }
 ```
 
+<Aside type="note">
+`Link` chama `router.push` e o roteador também intercepta cliques em `<a href>` internos; os dois não navegam duas vezes (cada clique gera uma única entrada no histórico). Em hash mode, o `href` do `Link` é o caminho puro (`/products`), então "abrir em nova aba" não vai para a rota em hash; para isso use um link `<a href="#/products">`.
+</Aside>
+
 <Aside type="tip">
-Use `router.replace()` em vez de `router.push()` em redirects para evitar que o usuário volte para a página de redirect.
+Use `router.replace()` em redirects para evitar que o usuário volte para a página de redirect.
 </Aside>
 
 ## Executando o Projeto
@@ -862,53 +619,25 @@ bun run dev
 bun run build
 ```
 
-## Transições de Página
-
-Adicione transições suaves:
-
-```css
-/* Fade transition */
-.page-enter {
-  opacity: 0;
-}
-
-.page-enter-active {
-  opacity: 1;
-  transition: opacity 0.3s;
-}
-
-.page-leave {
-  opacity: 1;
-}
-
-.page-leave-active {
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-```
-
 ## Melhorias Possíveis
 
 1. **Breadcrumbs**: Navegação hierárquica
-2. **Loading States**: Skeleton screens durante navegação
+2. **Loading States**: indicador usando `router.get().isNavigating`
 3. **Error Boundaries**: Tratamento de erros por rota
-4. **Route Transitions**: Animações entre páginas
-5. **Nested Routes**: Subrotas com layouts específicos
-6. **Route Meta**: Permissões, títulos, analytics
-7. **Scroll Restoration**: Lembrar posição do scroll
-8. **Prefetching**: Pré-carregar rotas ao hover
+4. **Nested Routes**: subrotas com `children`
+5. **Route Meta**: Permissões, títulos, analytics
+6. **Scroll Restoration**: lembrar a posição do scroll (manual, com `router.watch`)
 
 ## Pontos-Chave de Aprendizado
 
-1. **SPA Performance**: Navegação instantânea sem reload
-2. **Route Guards**: Controle de acesso às rotas
-3. **Lazy Loading**: Code splitting automático
-4. **Navigation Hooks**: beforeEach, afterEach para side effects
-5. **Query Params**: Estado na URL para compartilhamento
-6. **History API**: Controle total do histórico do navegador
+1. **SPA**: Navegação instantânea sem reload
+2. **Route Guards**: Controle de acesso, redirecionando com uma string
+3. **Páginas como componentes**: ``component: () => html`<${Page} />` `` para reatividade
+4. **Query Params**: Estado na URL para compartilhamento
+5. **`Link` com `router`**: a prop `router` é obrigatória
 
 ## Próximos Passos
 
-- [Form Validation](/exemplos/form-validation/) - Validação avançada de formulários
-- [Router API](/roteamento/api/) - Documentação completa do Router
+- [Roteamento](/roteamento/conceitos/) - Documentação completa do Router
 - [Navigation Guards](/roteamento/guards/) - Guards avançados
+- [Form Validation](/exemplos/form-validation/) - Validação avançada de formulários

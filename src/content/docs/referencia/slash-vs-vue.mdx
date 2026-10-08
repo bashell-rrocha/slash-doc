@@ -16,11 +16,10 @@ Esta página compara Slash e Vue em termos de sistema de reatividade, APIs, perf
 
 | Aspecto | Slash | Vue 3 |
 |---------|-------|-------|
-| **Tamanho** | ~5KB | ~34KB (runtime) |
 | **Reatividade** | Observer Pattern explícito | Proxy-based (Composition API) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
 | **Template Syntax** | HTM (JSX-like) | Template strings ou JSX |
-| **SSR** | ✅ Nativo | ✅ Sim (com Nuxt ou setup manual) |
+| **SSR** | ✅ `renderToString`/`renderToStream` no pacote | ✅ `vue/server-renderer` (Nuxt adiciona o resto) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro |
 | **Curva de Aprendizado** | Baixa | Média |
 | **Compile-time** | ❌ Runtime-only | ✅ Compiler otimizado |
@@ -68,17 +67,19 @@ Slash usa Observer Pattern com API explícita:
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
+// O state fica fora do componente (dentro dele seria recriado a cada render)
+const count = createState(0)
+
+// Computed manual
+const doubled = () => count.get() * 2
+
+// Monte como <${Counter} />
 function Counter() {
-  const count = createState(0)
-
-  // Computed manual
-  const doubled = () => count.get() * 2
-
   return html`
     <div>
       <p>Count: ${count.get()}</p>
       <p>Doubled: ${doubled()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -90,12 +91,12 @@ function Counter() {
 1. `createState()` cria estado reativo
 2. `get()` lê valor, `set()` atualiza
 3. `watch()` registra observers
-4. Update direto no DOM (sem VDOM)
-5. Sem tracking automático de dependências
+4. O componente que leu `get()` re-executa e substitui seus nós (sem VDOM)
+5. Tracking por componente: o que o componente lê durante a execução vira dependência
 6. Sem compiler, tudo em runtime
 
 <Aside type="note">
-Vue tem tracking automático de dependências. Slash requer `.get()` explícito. Trade-off: Vue é mais conveniente, Slash é mais explícito e previsível.
+Vue rastreia dependências por propriedade. No Slash o rastreio é por componente, via `.get()` explícito: ler um state no render inscreve o componente inteiro. Trade-off: Vue é mais granular e conveniente, Slash é mais explícito e previsível.
 </Aside>
 
 ---
@@ -127,13 +128,14 @@ const count = ref(0)
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Counter() {
-  const count = createState(0)
+// State fora do componente; monte como <${Counter} />
+const count = createState(0)
 
+function Counter() {
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -148,8 +150,7 @@ function Counter() {
 ```vue
 <!-- Vue 3 -->
 <script setup>
-import { defineProps, defineEmits } from 'vue'
-
+// defineProps e defineEmits são macros do compilador: não precisam de import
 const props = defineProps({
   title: String,
   count: Number
@@ -186,7 +187,7 @@ function MyComponent({ title, count, onUpdate }: Props) {
     <div>
       <h2>${title}</h2>
       <p>${count}</p>
-      <button onclick=${() => onUpdate(count + 1)}>
+      <button onClick=${() => onUpdate(count + 1)}>
         Update
       </button>
     </div>
@@ -228,30 +229,34 @@ watch(fullName, (newVal) => {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const firstName = createState('John')
+const lastName = createState('Doe')
+
+// Computed como função
+const fullName = () =>
+  `${firstName.get()} ${lastName.get()}`
+
+// Watcher (criado uma vez, fora do componente)
+firstName.watch((newVal) => {
+  console.log('First name changed:', newVal)
+})
+
+// Só este componente lê os states
+const FullName = () => html`<p>${fullName()}</p>`
+
+// Os inputs não leem states, então não são recriados a cada tecla
 function NameForm() {
-  const firstName = createState('John')
-  const lastName = createState('Doe')
-
-  // Computed como função
-  const fullName = () =>
-    `${firstName.get()} ${lastName.get()}`
-
-  // Watcher
-  firstName.watch((newVal) => {
-    console.log('First name changed:', newVal)
-  })
-
   return html`
     <div>
       <input
-        value=${firstName.get()}
-        oninput=${(e) => firstName.set(e.target.value)}
+        value="John"
+        onInput=${(e: Event) => firstName.set((e.target as HTMLInputElement).value)}
       />
       <input
-        value=${lastName.get()}
-        oninput=${(e) => lastName.set(e.target.value)}
+        value="Doe"
+        onInput=${(e: Event) => lastName.set((e.target as HTMLInputElement).value)}
       />
-      <p>${fullName()}</p>
+      <${FullName} />
     </div>
   `
 }
@@ -289,16 +294,16 @@ onUnmounted(() => {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Slash não tem onMounted/onUnmounted: o efeito vive fora do componente
+// e você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  // Cleanup automático
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>Seconds: ${seconds.get()}</p>`
 }
 ```
@@ -310,172 +315,11 @@ function Timer() {
 
 ## Performance
 
-### Bundle Size
+### Benchmarks e tamanho
 
-```bash
-# Slash (produção, minified + gzip)
-@_bashell/slash: ~5KB
+Esta página não traz benchmarks nem comparação de tamanho com o Vue: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-# Vue 3 (produção, minified + gzip)
-vue: ~34KB
-```
-
-**Impacto:** Slash é ~7x menor que Vue 3.
-
-### Runtime Performance
-
-| Operação | Slash | Vue 3 | Vue 3 (compiler optimized) |
-|----------|-------|-------|---------------------------|
-| **First Render** | 8ms | 15ms | 12ms |
-| **Update (1 campo)** | 1ms | 3ms | 2ms |
-| **Update (100 campos)** | 15ms | 45ms | 25ms |
-| **List (1000 items)** | 120ms | 280ms | 180ms |
-
-**Observações:**
-- Slash é mais rápido em updates pequenos (sem VDOM diff)
-- Vue 3 compiler otimiza bastante
-- Para apps grandes, diferença diminui
-
----
-
-## Template vs HTM
-
-### Vue: Template Strings Compilados
-
-```vue
-<template>
-  <div class="container">
-    <h1>{{ title }}</h1>
-    <ul>
-      <li v-for="item in items" :key="item.id">
-        {{ item.name }}
-      </li>
-    </ul>
-  </div>
-</template>
-```
-
-**Vantagens:**
-- ✅ Syntax highlighting
-- ✅ Validação em build time
-- ✅ Otimizações do compiler
-- ✅ Familiar para quem vem de HTML
-
-**Desvantagens:**
-- ❌ Requer build step
-- ❌ Diretivas customizadas (`v-if`, `v-for`)
-- ❌ Menos flexibilidade que JS puro
-
-### Slash: HTM (Runtime)
-
-```typescript
-import { html } from '@_bashell/slash'
-
-const Component = ({ title, items }) => html`
-  <div class="container">
-    <h1>${title}</h1>
-    <ul>
-      ${items.map(item => html`
-        <li key=${item.id}>${item.name}</li>
-      `)}
-    </ul>
-  </div>
-`
-```
-
-**Vantagens:**
-- ✅ Sem build step necessário
-- ✅ JavaScript puro (map, filter, if ternário)
-- ✅ Mais flexível
-- ✅ TypeScript direto
-
-**Desvantagens:**
-- ❌ Sem otimizações de compiler
-- ❌ Parsing em runtime
-- ❌ Syntax highlighting limitado
-
-<Aside type="tip">
-Vue oferece melhor DX com compiler. Slash é mais simples e direto, sem magic.
-</Aside>
-
----
-
-## Ecossistema
-
-### Vue 3
-
-**Frameworks:**
-- Nuxt 3 (SSR/SSG framework robusto)
-- Quasar (UI framework completo)
-- Vitepress (documentação)
-
-**Bibliotecas:**
-- Pinia (state management oficial)
-- Vue Router (routing oficial)
-- VueUse (collection de composables)
-- Vuetify, Element Plus, Ant Design Vue (UI libs)
-
-**Ferramentas:**
-- Vue DevTools (excelente)
-- Vite (build tool oficial)
-- Vue Language Server
-
-### Slash
-
-**Status Atual:**
-- ✅ Router integrado
-- ✅ SSR nativo
-- ✅ Data loading isomórfico
-- 🌱 Ecossistema crescendo
-- 📦 Foco em simplicidade
-
----
-
-## Casos de Uso
-
-### Quando Usar Vue
-
-1. **Aplicações Empresariais**
-   - Necessita de ecosystem maduro
-   - UI components prontos importantes
-   - Suporte e comunidade grandes
-
-2. **Projetos com Build Pipeline**
-   - Compiler optimizations importantes
-   - Single File Components (.vue) desejado
-   - Vite/Webpack já configurado
-
-3. **Time com Experiência Vue**
-   - Developers já conhecem Vue
-   - Patterns estabelecidos
-   - Migração de Vue 2
-
-4. **Necessidade de Nuxt**
-   - SSR/SSG avançado
-   - File-based routing
-   - Modules ecosystem
-
-### Quando Usar Slash
-
-1. **Simplicidade e Performance**
-   - Bundle size crítico
-   - Performance > conveniences
-   - Sem build step desejado
-
-2. **Prototipagem Rápida**
-   - MVPs rápidos
-   - Sem setup de build
-   - Drop-in via CDN
-
-3. **Aprendizado**
-   - Entender reatividade fundamental
-   - Sem abstrações
-   - TypeScript first-class
-
-4. **Micro Frontends**
-   - Apps pequenas isoladas
-   - Baixo overhead
-   - Fácil integração
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **≈ 8,3 KB gzip**. O número depende do que seu app importa.
 
 ---
 
@@ -490,9 +334,9 @@ Vue oferece melhor DX com compiler. Slash é mais simples e direto, sem magic.
 | `watch()` | `state.watch()` | API similar (Observer Pattern) |
 | `v-if` | Ternário `? :` | JavaScript nativo |
 | `v-for` | `.map()` | JavaScript nativo |
-| `v-model` | `value` + `oninput` | Binding manual |
-| `onMounted` | Código direto | Executa na criação |
-| `onUnmounted` | `onCleanup()` | Cleanup function |
+| `v-model` | `onInput` + `state.set()` (ou `textFieldControl`) | Binding manual |
+| `onMounted` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
+| `onUnmounted` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 | `props` | Function params | TypeScript interfaces |
 | `emit` | Callbacks | Funções em props |
 
@@ -536,26 +380,26 @@ function addTodo(text) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const todos = createState([])
+const filter = createState('all')
+
+const filteredTodos = () => {
+  const f = filter.get()
+  const t = todos.get()
+
+  if (f === 'active') return t.filter(t => !t.done)
+  if (f === 'completed') return t.filter(t => t.done)
+  return t
+}
+
+const addTodo = (text) => {
+  todos.set([
+    ...todos.get(),
+    { id: Date.now(), text, done: false }
+  ])
+}
+
 function TodoList() {
-  const todos = createState([])
-  const filter = createState('all')
-
-  const filteredTodos = () => {
-    const f = filter.get()
-    const t = todos.get()
-
-    if (f === 'active') return t.filter(t => !t.done)
-    if (f === 'completed') return t.filter(t => t.done)
-    return t
-  }
-
-  const addTodo = (text) => {
-    todos.set([
-      ...todos.get(),
-      { id: Date.now(), text, done: false }
-    ])
-  }
-
   return html`
     <div>
       <ul>
@@ -583,8 +427,7 @@ function TodoList() {
 - ✅ Comunidade grande
 
 **Contras:**
-- ❌ Bundle maior
-- ❌ Virtual DOM overhead
+- ❌ Mais dependências e conceitos (compiler, Virtual DOM)
 - ❌ Necessita build step para melhor DX
 - ❌ Mais abstrações/magic
 - ❌ Curva de aprendizado maior
@@ -592,8 +435,7 @@ function TodoList() {
 ### Slash
 
 **Prós:**
-- ✅ Extremamente leve (~5KB)
-- ✅ Performance excelente
+- ✅ Bundle pequeno (app mínimo medido em ≈ 8,3 KB gzip, veja a seção Performance)
 - ✅ API simples e explícita
 - ✅ Sem build step necessário
 - ✅ TypeScript first-class
@@ -619,7 +461,7 @@ function TodoList() {
 - Projeto médio/grande
 
 **Escolha Slash se:**
-- Performance/size críticos
+- Quer uma biblioteca pequena (app mínimo: ≈ 8,3 KB gzip)
 - Prefere simplicidade
 - Não quer build step
 - Gosta de explicitness

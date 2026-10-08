@@ -11,7 +11,7 @@ O Slash fornece **helpers tipados** para trabalhar com formulários de forma sim
 
 ### Abordagens disponíveis
 
-1. **Manual**: Controle total usando `createState()` e event handlers
+1. **Manual**: Controle total usando `createState()` e event handlers (campos não controlados)
 2. **Two-way binding**: Helpers para sincronização automática (ex: `textFieldControl`)
 3. **Form data**: Extrair dados do form com `formToObject()` e `onSubmit()`
 
@@ -19,38 +19,75 @@ O Slash fornece **helpers tipados** para trabalhar com formulários de forma sim
 Todos os helpers exportam tipos TypeScript completos para garantir type safety.
 </Aside>
 
-## Formulário básico (manual)
+## Limitação importante: foco e re-render
 
-A forma mais simples é usar `createState()` e event handlers:
+<Aside type="caution" title="Limitação conhecida">
+Quando um componente re-renderiza, o Slash **recria o DOM dele**, inclusive os `<input>`. Um campo dentro de um componente que re-renderiza a cada tecla perde o foco (e a posição do cursor) a cada tecla. Isso é uma limitação conhecida, não um bug a contornar com truques.
+
+Por isso, o padrão normal para formulários **não** é "ler o state do campo no render e re-renderizar a cada tecla". Use uma destas abordagens:
+
+1. **Binding reativo**: passe ao atributo um objeto `{ get, subscribe }` (`value=${reactive}`). O atributo é atualizado no lugar, sem recriar o `<input>`. É o que `textFieldControl`, `checkboxControl`, `radioControl` e `SelectControl` fazem.
+2. **Campos não controlados**: sem `value=`; o state é atualizado nos handlers e lido só no envio.
+
+Em qualquer caso, mostre valores derivados (erros, contadores, resumos) em componentes pequenos montados com `<${Comp} />`, e crie os states **fora** dos componentes.
+</Aside>
+
+## Binding reativo (`value=${reactive}`)
+
+Um objeto com `get()` e `subscribe(fn)` (o contrato `Reactive`) como valor de atributo mantém o elemento em sincronia com o state, sem re-render:
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 
+const name = createState({ value: '' })
+
+// Reactive derivado do state: { get, subscribe }
+const nameValue = {
+  get: () => name.get().value,
+  subscribe: (fn: (v: string) => void) => name.watch((s) => fn(s.value)),
+}
+
+function NameField() {
+  return html`
+    <input
+      value=${nameValue}
+      onInput=${(e: Event) => name.set({ value: (e.target as HTMLInputElement).value })}
+    />
+  `
+}
+
+// Chamada direta: o <input> é atualizado no lugar e mantém o foco
+render(NameField(), '#app')
+```
+
+<Aside type="note">
+Verificado: com a chamada direta (`render(NameField(), ...)`) o mesmo `<input>` permanece ao digitar. Se o formulário for montado como componente (`<${NameField} />`), a construção do elemento lê `get()` dentro do componente, que passa a depender do state e **recria** o campo a cada mudança. Construa os campos com binding reativo fora de componentes que re-renderizam (por exemplo, direto no `render()` ou dentro de um elemento estático). Veja um uso real em `slash-spa`, `src/pages/Tasks.tsx`.
+</Aside>
+
+## Formulário básico (manual)
+
+A forma mais simples é usar `createState()` e event handlers. Os campos são não controlados e o state é lido só no envio:
+
+```typescript
+import { html, createState, render } from '@_bashell/slash'
+
+const form = createState({ email: '', password: '' })
+
+const handleSubmit = (e: Event) => {
+  e.preventDefault()
+  console.log('Login:', form.get())
+}
+
+// Não lê states no render: os inputs nunca são recriados
 function LoginForm() {
-  const form = createState({
-    email: '',
-    password: ''
-  })
-
-  const handleSubmit = (e: Event) => {
-    e.preventDefault()
-    const data = form.get()
-    console.log('Login:', data)
-  }
-
   return html`
     <form onSubmit=${handleSubmit}>
       <div>
         <label>Email:</label>
         <input
           type="email"
-          value=${form.get().email}
           onInput=${(e: Event) => {
-            const current = form.get()
-            form.set({
-              ...current,
-              email: (e.target as HTMLInputElement).value
-            })
+            form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })
           }}
         />
       </div>
@@ -59,13 +96,8 @@ function LoginForm() {
         <label>Senha:</label>
         <input
           type="password"
-          value=${form.get().password}
           onInput=${(e: Event) => {
-            const current = form.get()
-            form.set({
-              ...current,
-              password: (e.target as HTMLInputElement).value
-            })
+            form.set({ ...form.get(), password: (e.target as HTMLInputElement).value })
           }}
         />
       </div>
@@ -74,28 +106,40 @@ function LoginForm() {
     </form>
   `
 }
+
+render(html`<${LoginForm} />`, '#app')
 ```
 
 ## Two-way binding com helpers
 
-O Slash fornece helpers para binding automático:
+Os controles (`textFieldControl`, `checkboxControl`, `radioControl`, `SelectControl`) devolvem props prontas para espalhar no elemento (`...${controle}`). O valor é um `Reactive`: o elemento acompanha o state **sem** re-renderizar o componente, e o evento atualiza o state.
+
+<Aside type="caution">
+Os controles leem o state ao construir o elemento. Se o formulário estiver dentro de um componente montado com `<${Form} />`, esse componente passa a depender do state e **recria** os campos a cada mudança. Para manter os campos estáveis, construa o formulário chamando a função diretamente (`render(Form(), '#app')`, ou dentro de um elemento que não seja um componente reativo) e coloque qualquer leitura do valor em componentes separados, como `<${Resumo} />` nos exemplos abaixo.
+</Aside>
 
 ### `textFieldControl` - Text inputs e textareas
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 import { textFieldControl } from '@_bashell/slash'
 
+const nameState = createState({ value: '' })
+const bioState = createState({ value: '' })
+
+// Control para <input> e <textarea>
+const nameControl = textFieldControl(nameState, 'input')
+const bioControl = textFieldControl(bioState, 'input')
+
+// Mostra os valores: componente à parte, montado com <${Resumo} />
+const Resumo = () => html`
+  <div>
+    <p>Nome: ${nameState.get().value}</p>
+    <p>Bio: ${bioState.get().value}</p>
+  </div>
+`
+
 function TextForm() {
-  const nameState = createState({ value: '' })
-  const bioState = createState({ value: '' })
-
-  // Control para <input>
-  const nameControl = textFieldControl(nameState, 'input')
-
-  // Control para <textarea>
-  const bioControl = textFieldControl(bioState, 'input')
-
   return html`
     <form>
       <div>
@@ -108,11 +152,13 @@ function TextForm() {
         <textarea ...${bioControl}></textarea>
       </div>
 
-      <p>Nome: ${nameState.get().value}</p>
-      <p>Bio: ${bioState.get().value}</p>
+      <${Resumo} />
     </form>
   `
 }
+
+// Chamada direta: os campos são atualizados no lugar, sem serem recriados
+render(TextForm(), '#app')
 ```
 
 #### Modos de controle
@@ -139,16 +185,23 @@ const ctrl3 = textFieldControl(state, 'both')
 ### `checkboxControl` - Checkboxes
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 import { checkboxControl } from '@_bashell/slash'
 
+const termsState = createState({ value: false })
+const newsState = createState({ value: true })
+
+const termsCtrl = checkboxControl(termsState)
+const newsCtrl = checkboxControl(newsState)
+
+const Resumo = () => html`
+  <div>
+    <p>Termos aceitos: ${termsState.get().value ? 'Sim' : 'Não'}</p>
+    <p>Newsletter: ${newsState.get().value ? 'Sim' : 'Não'}</p>
+  </div>
+`
+
 function TermsForm() {
-  const termsState = createState({ value: false })
-  const newsState = createState({ value: true })
-
-  const termsCtrl = checkboxControl(termsState)
-  const newsCtrl = checkboxControl(newsState)
-
   return html`
     <form>
       <label>
@@ -161,26 +214,29 @@ function TermsForm() {
         Receber newsletter
       </label>
 
-      <p>Termos aceitos: ${termsState.get().value ? 'Sim' : 'Não'}</p>
-      <p>Newsletter: ${newsState.get().value ? 'Sim' : 'Não'}</p>
+      <${Resumo} />
     </form>
   `
 }
+
+render(TermsForm(), '#app')
 ```
 
 ### `radioControl` - Radio buttons
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 import { radioControl } from '@_bashell/slash'
 
+const themeState = createState({ value: 'light' })
+
+const lightCtrl = radioControl(themeState, 'light')
+const darkCtrl = radioControl(themeState, 'dark')
+const autoCtrl = radioControl(themeState, 'auto')
+
+const Selecionado = () => html`<p>Tema selecionado: ${themeState.get().value}</p>`
+
 function PreferenceForm() {
-  const themeState = createState({ value: 'light' })
-
-  const lightCtrl = radioControl(themeState, 'light')
-  const darkCtrl = radioControl(themeState, 'dark')
-  const autoCtrl = radioControl(themeState, 'auto')
-
   return html`
     <form>
       <p>Escolha o tema:</p>
@@ -200,22 +256,26 @@ function PreferenceForm() {
         Automático
       </label>
 
-      <p>Tema selecionado: ${themeState.get().value}</p>
+      <${Selecionado} />
     </form>
   `
 }
+
+render(PreferenceForm(), '#app')
 ```
 
 ### `SelectControl` - Select dropdowns
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
 import { SelectControl } from '@_bashell/slash'
 
-function CountryForm() {
-  const countryState = createState({ value: 'br' })
-  const countryCtrl = SelectControl(countryState)
+const countryState = createState({ value: 'br' })
+const countryCtrl = SelectControl(countryState)
 
+const Selecionado = () => html`<p>País selecionado: ${countryState.get().value}</p>`
+
+function CountryForm() {
   return html`
     <form>
       <label>
@@ -228,10 +288,12 @@ function CountryForm() {
         </select>
       </label>
 
-      <p>País selecionado: ${countryState.get().value}</p>
+      <${Selecionado} />
     </form>
   `
 }
+
+render(CountryForm(), '#app')
 ```
 
 ## Form data helpers
@@ -287,52 +349,39 @@ function ContactForm() {
 
 ## Validação
 
-O Slash não possui um sistema de validação built-in, mas você pode criar facilmente com `createState()`:
+O Slash não possui um sistema de validação built-in, mas você pode criar facilmente com `createState()`. Os campos ficam não controlados e só a área de erros é reativa:
 
 ### Validação básica
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
+
+const values = { email: '', password: '' } // texto em edição: não é lido no render
+const errors = createState({ email: '', password: '' })
+
+const validate = () => {
+  const next = { email: '', password: '' }
+
+  if (!values.email) next.email = 'Email é obrigatório'
+  else if (!values.email.includes('@')) next.email = 'Email inválido'
+
+  if (!values.password) next.password = 'Senha é obrigatória'
+  else if (values.password.length < 6) next.password = 'Senha deve ter no mínimo 6 caracteres'
+
+  errors.set(next)
+  return !next.email && !next.password
+}
+
+// Só este componente lê `errors`: os inputs não são recriados ao validar
+const FieldError = ({ field }: { field: 'email' | 'password' }) => {
+  const message = errors.get()[field]
+  return html`${message && html`<span class="error">${message}</span>`}`
+}
 
 function SignupForm() {
-  const form = createState({
-    email: '',
-    password: '',
-    errors: {
-      email: '',
-      password: ''
-    }
-  })
-
-  const validate = () => {
-    const state = form.get()
-    const errors = { email: '', password: '' }
-
-    // Validar email
-    if (!state.email) {
-      errors.email = 'Email é obrigatório'
-    } else if (!state.email.includes('@')) {
-      errors.email = 'Email inválido'
-    }
-
-    // Validar senha
-    if (!state.password) {
-      errors.password = 'Senha é obrigatória'
-    } else if (state.password.length < 6) {
-      errors.password = 'Senha deve ter no mínimo 6 caracteres'
-    }
-
-    form.set({ ...state, errors })
-
-    return !errors.email && !errors.password
-  }
-
   const handleSubmit = (e: Event) => {
     e.preventDefault()
-
-    if (validate()) {
-      console.log('Formulário válido!', form.get())
-    }
+    if (validate()) console.log('Formulário válido!', values)
   }
 
   return html`
@@ -341,98 +390,75 @@ function SignupForm() {
         <input
           type="email"
           placeholder="Email"
-          value=${form.get().email}
-          onInput=${(e: Event) => {
-            const state = form.get()
-            form.set({
-              ...state,
-              email: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, email: '' }
-            })
-          }}
+          onInput=${(e: Event) => { values.email = (e.target as HTMLInputElement).value }}
         />
-        ${form.get().errors.email &&
-          html`<span class="error">${form.get().errors.email}</span>`}
+        <${FieldError} field="email" />
       </div>
 
       <div>
         <input
           type="password"
           placeholder="Senha"
-          value=${form.get().password}
-          onInput=${(e: Event) => {
-            const state = form.get()
-            form.set({
-              ...state,
-              password: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, password: '' }
-            })
-          }}
+          onInput=${(e: Event) => { values.password = (e.target as HTMLInputElement).value }}
         />
-        ${form.get().errors.password &&
-          html`<span class="error">${form.get().errors.password}</span>`}
+        <${FieldError} field="password" />
       </div>
 
       <button type="submit">Cadastrar</button>
     </form>
   `
 }
+
+render(html`<${SignupForm} />`, '#app')
 ```
 
 ### Validação assíncrona
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
+
+const status = createState({ checking: false, error: '' })
+let username = ''
+
+const checkUsername = async (name: string) => {
+  status.set({ checking: true, error: '' })
+
+  try {
+    const res = await fetch(`/api/check-username?name=${encodeURIComponent(name)}`)
+    const { available } = await res.json()
+
+    status.set({ checking: false, error: available ? '' : 'Username já existe' })
+  } catch (err) {
+    status.set({ checking: false, error: 'Erro ao verificar' })
+  }
+}
+
+// Só a mensagem lê o state
+const UsernameStatus = () => {
+  const { checking, error } = status.get()
+  return html`
+    <span>
+      ${checking && html`<span>Verificando...</span>`}
+      ${error && html`<span class="error">${error}</span>`}
+    </span>
+  `
+}
 
 function UsernameForm() {
-  const state = createState({
-    username: '',
-    checking: false,
-    error: ''
-  })
-
-  const checkUsername = async (username: string) => {
-    state.set({ ...state.get(), checking: true, error: '' })
-
-    try {
-      const res = await fetch(`/api/check-username?name=${username}`)
-      const { available } = await res.json()
-
-      state.set({
-        ...state.get(),
-        checking: false,
-        error: available ? '' : 'Username já existe'
-      })
-    } catch (err) {
-      state.set({
-        ...state.get(),
-        checking: false,
-        error: 'Erro ao verificar'
-      })
-    }
-  }
-
   return html`
     <form>
       <input
         type="text"
         placeholder="Username"
-        value=${state.get().username}
-        onInput=${(e: Event) => {
-          const username = (e.target as HTMLInputElement).value
-          state.set({ ...state.get(), username })
-        }}
-        onBlur=${() => {
-          const username = state.get().username
-          if (username) checkUsername(username)
-        }}
+        onInput=${(e: Event) => { username = (e.target as HTMLInputElement).value }}
+        onBlur=${() => { if (username) checkUsername(username) }}
       />
-
-      ${state.get().checking && html`<span>Verificando...</span>`}
-      ${state.get().error && html`<span class="error">${state.get().error}</span>`}
+      <${UsernameStatus} />
     </form>
   `
 }
+
+render(html`<${UsernameForm} />`, '#app')
 ```
 
 ## Tipos de eventos de formulário

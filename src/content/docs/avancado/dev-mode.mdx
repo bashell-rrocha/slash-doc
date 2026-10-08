@@ -31,6 +31,16 @@ if (isDevMode()) {
 Em produção, o modo dev é automaticamente desabilitado para melhor performance. Warnings e validações extras não são executados.
 </Aside>
 
+### Build de desenvolvimento e de produção
+
+O pacote publica dois builds de cada entrada (`core`, `router`, `forms`, `ssr`). O build de **desenvolvimento** (`dist/dev`) traz os avisos de segurança e de uso; o de **produção** (`dist`) não os traz. A escolha é feita pelas condições de exportação do `package.json`:
+
+- Vite em `dev` e webpack em `mode: "development"` resolvem a condição `development` e já usam o build com avisos, sem configuração.
+- Em produção (e no Node puro) vale o build sem avisos. Os erros de verdade (`ErrorBoundary`, guards do roteador, `batch`) continuam indo para `console.error`.
+- Para forçar os avisos fora de um bundler: `node --conditions=development app.mjs`.
+
+As mensagens de aviso e de erro do runtime são todas em inglês.
+
 ## Warnings
 
 Warnings ajudam a detectar potenciais problemas e anti-patterns no código.
@@ -155,7 +165,7 @@ function Counter() {
   const count = createState(0); // Warning!
 
   return html`
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Count: ${count.get()}
     </button>
   `;
@@ -166,7 +176,7 @@ const count = createState(0);
 
 function Counter() {
   return html`
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Count: ${count.get()}
     </button>
   `;
@@ -191,6 +201,8 @@ function MyComponent() { ... }
 ```
 
 #### 5. Batch Aninhado
+
+Batches aninhados funcionam (as notificações ocorrem no fim do batch mais externo); o aviso existe porque o batch interno é redundante.
 
 ```typescript
 import { batch, createState } from '@_bashell/slash';

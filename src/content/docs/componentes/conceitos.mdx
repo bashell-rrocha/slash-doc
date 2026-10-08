@@ -35,15 +35,16 @@ Um componente Slash típico segue esta estrutura:
 
 ```typescript
 import { html, createState } from '@_bashell/slash'
-import type { Component } from '@_bashell/slash'
+import type { Component, State } from '@_bashell/slash'
 
 type CounterProps = {
-  initialValue?: number
+  count: State<number>
   onValueChange?: (value: number) => void
 }
 
-const Counter: Component<CounterProps> = ({ initialValue = 0, onValueChange }) => {
-  const count = createState(initialValue)
+// O state vem de fora (props ou módulo): se fosse criado aqui dentro,
+// seria recriado a cada re-render e perderia o valor
+const Counter: Component<CounterProps> = ({ count, onValueChange }) => {
 
   const increment = () => {
     const newValue = count.get() + 1
@@ -53,7 +54,7 @@ const Counter: Component<CounterProps> = ({ initialValue = 0, onValueChange }) =
 
   return html`
     <div class="counter">
-      <p>Contador: ${count}</p>
+      <p>Contador: ${count.get()}</p>
       <button onClick=${increment}>+1</button>
     </div>
   `
@@ -65,7 +66,7 @@ const Counter: Component<CounterProps> = ({ initialValue = 0, onValueChange }) =
 1. **Função pura**: Componente é apenas uma função
 2. **Props tipadas**: Use TypeScript para definir o contrato
 3. **Retorno**: Qualquer `Child` válido (Node, string, número, array, etc.)
-4. **Estado local**: Crie estados com `createState()` dentro do componente
+4. **Estado fora do componente**: crie o state fora da função (módulo ou props). Um componente re-executa quando um state que ele leu muda, então um `createState()` dentro dele seria recriado a cada render. Monte-o como `<${Counter} />`: chamado diretamente (`Counter()`), ele executa uma vez e não é reativo
 5. **Event handlers**: Passe funções diretamente às props
 
 ## Props
@@ -96,18 +97,15 @@ const app = html`<${Greeting} name="João" age=${25} />`
 ### Props com valores padrão
 
 ```typescript
-function Panel({ title = 'Sem título', collapsed = false }: {
-  title?: string
-  collapsed?: boolean
-}) {
-  const isOpen = createState(!collapsed)
+const isOpen = createState(true)
 
+function Panel({ title = 'Sem título' }: { title?: string }) {
   return html`
     <div class="panel">
       <h3 onClick=${() => isOpen.set(!isOpen.get())}>
         ${title}
       </h3>
-      ${isOpen && html`<div class="panel-content">Conteúdo aqui</div>`}
+      ${isOpen.get() && html`<div class="panel-content">Conteúdo aqui</div>`}
     </div>
   `
 }
@@ -115,14 +113,14 @@ function Panel({ title = 'Sem título', collapsed = false }: {
 
 ### Props reativas
 
-Você pode passar estados reativos como props:
+Você pode passar um `State` como prop. Ele **não** é reativo por si só (um `State` tem `get`/`watch`, não `subscribe`): o componente que chama `get()` é quem re-renderiza quando o state muda.
 
 ```typescript
 import { createState, html } from '@_bashell/slash'
 
 function Display({ count }) {
-  // count é um State<number>, automaticamente reativo
-  return html`<p>Valor: ${count}</p>`
+  // count é um State<number>: ler com get() inscreve Display no state
+  return html`<p>Valor: ${count.get()}</p>`
 }
 
 const value = createState(0)
@@ -136,7 +134,7 @@ const app = html`
 ```
 
 <Aside type="tip">
-Passar estados reativos como props permite que componentes filhos reajam automaticamente às mudanças sem precisar re-renderizar o componente pai!
+Quem lê `count.get()` é o componente filho, então só ele re-renderiza quando o state muda: o componente pai não precisa executar de novo.
 </Aside>
 
 ## Children
@@ -255,12 +253,13 @@ const TaskItem: Component<{ task: Task; onToggle: (id: number) => void }> = ({
 }
 
 // Componente de lista
-const TaskList: Component = () => {
-  const tasks = createState<Task[]>([
-    { id: 1, title: 'Aprender Slash', completed: false },
-    { id: 2, title: 'Criar app', completed: false },
-  ])
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const tasks = createState<Task[]>([
+  { id: 1, title: 'Aprender Slash', completed: false },
+  { id: 2, title: 'Criar app', completed: false },
+])
 
+const TaskList: Component = () => {
   const toggleTask = (id: number) => {
     const current = tasks.get()
     tasks.set(
@@ -292,16 +291,23 @@ Para componentes com múltiplos estados relacionados, agrupe-os em um único obj
 ```typescript
 import { html, createState, batch } from '@_bashell/slash'
 
-function UserForm() {
-  const formState = createState({
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const formState = createState({
+  name: '',
+  email: '',
+  errors: {
     name: '',
-    email: '',
-    errors: {
-      name: '',
-      email: ''
-    }
-  })
+    email: ''
+  }
+})
 
+// Mensagens de erro: único componente que lê `errors`
+const FieldError = ({ field }: { field: 'name' | 'email' }) => {
+  const message = formState.get().errors[field]
+  return html`${message && html`<span class="error">${message}</span>`}`
+}
+
+function UserForm() {
   const validate = () => {
     const state = formState.get()
     const errors = { name: '', email: '' }
@@ -329,42 +335,31 @@ function UserForm() {
     }
   }
 
+  // O form não lê states no render: os <input> não são recriados ao digitar
   return html`
     <form onSubmit=${handleSubmit}>
       <div>
         <input
           type="text"
           placeholder="Nome"
-          value=${formState.get().name}
           onInput=${(e: Event) => {
             const state = formState.get()
-            formState.set({
-              ...state,
-              name: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, name: '' }
-            })
+            formState.set({ ...state, name: (e.target as HTMLInputElement).value })
           }}
         />
-        ${formState.get().errors.name &&
-          html`<span class="error">${formState.get().errors.name}</span>`}
+        <${FieldError} field="name" />
       </div>
 
       <div>
         <input
           type="email"
           placeholder="Email"
-          value=${formState.get().email}
           onInput=${(e: Event) => {
             const state = formState.get()
-            formState.set({
-              ...state,
-              email: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, email: '' }
-            })
+            formState.set({ ...state, email: (e.target as HTMLInputElement).value })
           }}
         />
-        ${formState.get().errors.email &&
-          html`<span class="error">${formState.get().errors.email}</span>`}
+        <${FieldError} field="email" />
       </div>
 
       <button type="submit">Enviar</button>
@@ -373,8 +368,12 @@ function UserForm() {
 }
 ```
 
+<Aside type="note">
+Um componente que lê `formState` no render re-renderiza (e recria os `<input>`) a cada `set`. Por isso o formulário só lê o state dentro dos handlers, e as partes que mudam (mensagens de erro) ficam em componentes menores, montados com `<${FieldError} />`. Veja [Formulários](/formularios/conceitos/).
+</Aside>
+
 ## Próximos passos
 
 - [Lifecycle e Cleanup](/componentes/lifecycle/) - Gerenciando recursos e limpeza
 - [Roteamento](/roteamento/conceitos/) - Criando SPAs com router
-- [Formulários](/formularios/validacao/) - Trabalhando com forms e validação
+- [Formulários](/formularios/conceitos/) - Trabalhando com forms e validação

@@ -200,13 +200,16 @@ const styles = { color: 'red', fontSize: '16px' }
 const el2 = html`<div style=${styles}></div>`
 ```
 
+Cada declaração passa por uma política de CSS: declarações inseguras (`url(javascript:...)`, `expression(...)`, comentários `/* */`, barra invertida fora de aspas, `url()` sem aspas com caracteres fora do conjunto seguro) são descartadas e as demais são mantidas. Um `style` com mais de 8 KB é descartado, e um que fica vazio é omitido. Veja [Segurança](/fundamentos/seguranca/).
+
 ### Children (Filhos)
 
 Children podem ser:
 - Strings e números
 - Elementos DOM (Node)
 - Arrays (aninhados)
-- Reactive/State (atualizados automaticamente)
+- Objetos `Reactive<T>` (com `get()` e `subscribe()`, como `Router({ router })`), mantidos em sincronia via `subscribe`
+- Valores lidos de um `State` com `state.get()`. Passar o próprio `State` como child (`${count}`) **não** é reativo: o componente que lê `get()` re-renderiza quando o state muda
 - `null`, `undefined`, `false` (ignorados)
 
 ```typescript
@@ -215,10 +218,11 @@ import { html, createState } from '@_bashell/slash'
 const count = createState(0)
 const name = "Alice"
 
-const element = html`
+// Monte como <${Page} /> para que a leitura de count.get() seja reativa
+const Page = () => html`
   <div>
     <h1>Hello, ${name}!</h1>
-    <p>Count: ${count}</p>
+    <p>Count: ${count.get()}</p>
     ${count.get() > 5 && html`<p>Count is high!</p>`}
     <ul>
       ${[1, 2, 3].map(n => html`<li>Item ${n}</li>`)}
@@ -226,6 +230,26 @@ const element = html`
   </div>
 `
 ```
+
+#### Strings são sempre texto
+
+Uma string nunca vira HTML, seja qual for o conteúdo. Isso protege contra XSS e vale para qualquer valor, inclusive os que vêm do usuário:
+
+```typescript
+const comentario = '<img src=x onerror="alert(1)">'
+
+html`<p>${comentario}</p>` // mostra o texto literal; nada executa
+```
+
+Para inserir marcação confiável que você mesmo gerou, use `unsafeHtml(...)` como filho. Ele **não sanitiza**: nunca passe dado de usuário por ele.
+
+```typescript
+import { html, unsafeHtml } from '@_bashell/slash/core'
+
+html`<button>${unsafeHtml('<svg viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>')} Salvar</button>`
+```
+
+Veja a página [Segurança](/fundamentos/seguranca/) para as regras de URLs, eventos e estilos.
 
 **Implementação:** [src/rendering/children.ts](../../src/rendering/children.ts:1)
 
@@ -249,6 +273,14 @@ render(App(), root)
 // Ou usando seletor CSS
 render(App(), '#app')
 ```
+
+:::caution[Reatividade depende de como o componente é montado]
+Um componente chamado diretamente (`App()`) executa uma única vez: se ele lê `state.get()`, a interface **não** re-renderiza quando o state muda. Para um componente reativo, monte-o como `<${App} />`:
+
+```typescript
+render(html`<${App} />`, '#app')
+```
+:::
 
 ### Assinatura
 
@@ -285,20 +317,18 @@ render(html`<div>Second</div>`, root)
 
 #### Hidratação SSR
 
-Se o container já tem conteúdo renderizado pelo servidor E existe um `<script id="__SLASH_STATE__">`, `render()` hidrata em vez de substituir:
+Se o container já tem conteúdo renderizado pelo servidor E existe um `<script id="__SLASH_STATE__">`, `render()` lê o JSON do script, remove o script, **limpa o container** e renderiza a view no cliente. O DOM do servidor não é reaproveitado e o estado do JSON não é aplicado aos seus states (veja [Hydration](/avancado/hydration/)):
 
 ```typescript
 // Server-side
-const html = renderToString(App())
+const { html, state } = renderToString(() => App())
 const output = `
   <div id="app">${html}</div>
-  <script id="__SLASH_STATE__" type="application/json">
-    ${JSON.stringify(stateData)}
-  </script>
+  <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
 `
 
-// Client-side
-render(App(), '#app') // Hidrata DOM existente
+// Client-side: substitui o HTML do servidor por nós renderizados no cliente
+render(html`<${App} />`, '#app')
 ```
 
 #### Erro Handling
@@ -322,22 +352,26 @@ Event handlers são passados como props prefixadas com `on`:
 ### Sintaxe Básica
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
+import { html, createState, render } from '@_bashell/slash'
+
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
 const Counter = () => {
-  const count = createState(0)
-
   const increment = () => count.set(count.get() + 1)
   const decrement = () => count.set(count.get() - 1)
 
   return html`
     <div>
-      <p>Count: ${count}</p>
-      <button onclick=${increment}>+</button>
-      <button onclick=${decrement}>-</button>
+      <p>Count: ${count.get()}</p>
+      <button onClick=${increment}>+</button>
+      <button onClick=${decrement}>-</button>
     </div>
   `
 }
+
+// Monte como <${Counter} />: render(Counter(), ...) renderiza uma vez, sem reatividade
+render(html`<${Counter} />`, '#app')
 ```
 
 ### Eventos Disponíveis
@@ -348,12 +382,12 @@ Todos os eventos DOM padrão são suportados:
 const element = html`
   <input
     type="text"
-    oninput=${(e) => console.log(e.target.value)}
-    onchange=${handleChange}
-    onfocus=${handleFocus}
-    onblur=${handleBlur}
-    onkeydown=${handleKeyDown}
-    onkeyup=${handleKeyUp}
+    onInput=${(e) => console.log(e.target.value)}
+    onChange=${handleChange}
+    onFocus=${handleFocus}
+    onBlur=${handleBlur}
+    onKeyDown=${handleKeyDown}
+    onKeyUp=${handleKeyUp}
   />
 `
 ```
@@ -370,7 +404,7 @@ const handleClick = (event: MouseEvent) => {
 }
 
 const button = html`
-  <button onclick=${handleClick}>Click Me</button>
+  <button onClick=${handleClick}>Click Me</button>
 `
 ```
 
@@ -410,7 +444,7 @@ const handleInput = (e: TextFieldEvent<'input'>) => {
 
 const form = html`
   <form>
-    <input type="text" oninput=${handleInput} />
+    <input type="text" onInput=${handleInput} />
   </form>
 `
 ```
@@ -424,7 +458,7 @@ Event listeners são **automaticamente removidos** quando um nó é destruído:
 ```typescript
 import { destroyNode } from '@_bashell/slash'
 
-const button = html`<button onclick=${handler}>Click</button>`
+const button = html`<button onClick=${handler}>Click</button>`
 
 // Quando não mais necessário
 destroyNode(button as Node) // Remove listener automaticamente
@@ -434,27 +468,27 @@ destroyNode(button as Node) // Remove listener automaticamente
 
 ## Exemplos Práticos
 
-### Exemplo 1: Botão com Estado
+### Exemplo 1: Botão Toggle
 
 ```typescript
 import { html, createState, render } from '@_bashell/slash'
 
-const ToggleButton = () => {
-  const isActive = createState(false)
+const isActive = createState(false)
 
+const ToggleButton = () => {
   const toggle = () => isActive.set(!isActive.get())
 
   return html`
     <button
       class=${isActive.get() ? 'active' : ''}
-      onclick=${toggle}
+      onClick=${toggle}
     >
       ${isActive.get() ? 'Active' : 'Inactive'}
     </button>
   `
 }
 
-render(ToggleButton(), '#app')
+render(html`<${ToggleButton} />`, '#app')
 ```
 
 ### Exemplo 2: Lista Dinâmica
@@ -462,15 +496,17 @@ render(ToggleButton(), '#app')
 ```typescript
 import { html, createState, render } from '@_bashell/slash'
 
-const TodoList = () => {
-  const todos = createState<string[]>(['Buy milk', 'Walk dog'])
-  const input = createState('')
+const todos = createState<string[]>(['Buy milk', 'Walk dog'])
 
+// Texto em edição fora de qualquer state lido no render: o <input> não é recriado a cada tecla
+let draft = ''
+
+const TodoList = () => {
   const addTodo = () => {
-    const value = input.get().trim()
+    const value = draft.trim()
     if (value) {
       todos.set([...todos.get(), value])
-      input.set('')
+      draft = ''
     }
   }
 
@@ -482,15 +518,14 @@ const TodoList = () => {
       </ul>
       <input
         type="text"
-        value=${input}
-        oninput=${(e: Event) => input.set((e.target as HTMLInputElement).value)}
+        onInput=${(e: Event) => { draft = (e.target as HTMLInputElement).value }}
       />
-      <button onclick=${addTodo}>Add</button>
+      <button onClick=${addTodo}>Add</button>
     </div>
   `
 }
 
-render(TodoList(), '#app')
+render(html`<${TodoList} />`, '#app')
 ```
 
 ### Exemplo 3: Form com Validação
@@ -498,50 +533,57 @@ render(TodoList(), '#app')
 ```typescript
 import { html, createState, render } from '@_bashell/slash'
 
-const LoginForm = () => {
-  const email = createState('')
-  const password = createState('')
-  const error = createState('')
+const form = createState({ email: '', password: '' })
+const error = createState('')
 
-  const handleSubmit = (e: Event) => {
-    e.preventDefault()
+const handleSubmit = (e: Event) => {
+  e.preventDefault()
+  const { email, password } = form.get()
 
-    if (!email.get().includes('@')) {
-      error.set('Invalid email')
-      return
-    }
-
-    if (password.get().length < 6) {
-      error.set('Password must be at least 6 characters')
-      return
-    }
-
-    error.set('')
-    console.log('Login:', { email: email.get(), password: password.get() })
+  if (!email.includes('@')) {
+    error.set('Invalid email')
+    return
   }
 
-  return html`
-    <form onsubmit=${handleSubmit}>
-      <h1>Login</h1>
-      ${error.get() && html`<p class="error">${error}</p>`}
-      <input
-        type="email"
-        placeholder="Email"
-        value=${email}
-        oninput=${(e: Event) => email.set((e.target as HTMLInputElement).value)}
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        value=${password}
-        oninput=${(e: Event) => password.set((e.target as HTMLInputElement).value)}
-      />
-      <button type="submit">Login</button>
-    </form>
-  `
+  if (password.length < 6) {
+    error.set('Password must be at least 6 characters')
+    return
+  }
+
+  error.set('')
+  console.log('Login:', { email, password })
 }
 
-render(LoginForm(), '#app')
+// Só este componente lê `error`: os inputs não são recriados ao validar
+const ErrorMessage = () => {
+  const message = error.get()
+  return html`${message && html`<p class="error">${message}</p>`}`
+}
+
+// `form` só é lido dentro dos handlers, então o form não re-renderiza a cada tecla
+const LoginForm = () => html`
+  <form onSubmit=${handleSubmit}>
+    <h1>Login</h1>
+    <${ErrorMessage} />
+    <input
+      type="email"
+      placeholder="Email"
+      onInput=${(e: Event) =>
+        form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })
+      }
+    />
+    <input
+      type="password"
+      placeholder="Password"
+      onInput=${(e: Event) =>
+        form.set({ ...form.get(), password: (e.target as HTMLInputElement).value })
+      }
+    />
+    <button type="submit">Login</button>
+  </form>
+`
+
+render(html`<${LoginForm} />`, '#app')
 ```
 
 ## Próximos Passos

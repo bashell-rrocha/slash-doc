@@ -16,7 +16,7 @@ Universal Data Loading (ou Data Fetching Isomórfico) permite que você escreva 
 
 - ✅ **Código Único**: Mesma lógica funciona em servidor e cliente
 - ✅ **Cache Inteligente**: Reduz requisições desnecessárias
-- ✅ **Hidratação Automática**: Dados do servidor são reutilizados no cliente
+- ✅ **Hidratação do cache**: dados do servidor entram no cache do cliente com `hydrateLoaderCache`
 - ✅ **TTL Configurável**: Controle fino sobre expiração de cache
 - ✅ **Invalidação Seletiva**: Limpar cache por chave ou tudo
 
@@ -302,6 +302,10 @@ const serialized = serializeLoaderData(loaderData)
 // '{"user:{\"id\":\"123\"}":{"id":123,"name":"John"},"posts:{}":[{"id":1,"title":"Post 1"}]}'
 ```
 
+:::tip[Seguro para `<script>`]
+`serializeLoaderData` faz `JSON.stringify` e escapa `<`, `>`, `&`, U+2028 e U+2029 (o mesmo que `serializeStateForScript`), então o resultado pode ir dentro de `<script type="application/json">` sem fechar a tag. Um valor de nível superior que não seja JSON (por exemplo `undefined`) vira `"null"`. Use sempre `type="application/json"` na tag: o conteúdo é lido por `textContent` e `deserializeLoaderData`, nunca executado.
+:::
+
 ### `deserializeLoaderData()`
 
 Deserializa dados no cliente:
@@ -354,7 +358,7 @@ import {
   renderToString,
   htmlString,
   createLoader,
-  serializeLoaderData
+  serializeStateForScript
 } from '@_bashell/slash'
 
 // Criar loader
@@ -384,8 +388,8 @@ async function renderPage(userId: string) {
 
   const { html } = renderToString(App)
 
-  // Serializar dados do loader
-  const loaderData = serializeLoaderData({
+  // Serializar dados do loader (com escape seguro para <script>)
+  const loaderData = serializeStateForScript({
     [`user:${JSON.stringify({ id: userId })}`]: user
   })
 
@@ -395,9 +399,7 @@ async function renderPage(userId: string) {
     <html>
       <body>
         ${html}
-        <script id="__LOADER_DATA__" type="application/json">
-        ${loaderData}
-        </script>
+        <script id="__LOADER_DATA__" type="application/json">${loaderData}</script>
         <script src="/client.js" type="module"></script>
       </body>
     </html>
@@ -592,6 +594,16 @@ import {
 
 type Post = { id: string; title: string; content: string }
 
+// Para o shell do documento (template literal comum), que não escapa nada.
+// NÃO use dentro de htmlString (o valor seria escapado duas vezes)
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
 const postsLoader = createLoader(
   async () => {
     const res = await fetch('https://api.example.com/posts')
@@ -625,23 +637,29 @@ async function renderBlogPage(postId: string) {
 
   const { html } = renderToString(App)
 
-  // Serializar dados
+  // Serializar dados (já escapado para uso dentro de <script>)
   const loaderData = serializeLoaderData({
     [`post:${JSON.stringify({ id: postId })}`]: post
   })
 
-  return `
-    <!DOCTYPE html>
-    <html>
-      <body>
-        ${html}
-        <script id="__LOADER_DATA__">${loaderData}</script>
-        <script src="/client.js" type="module"></script>
-      </body>
-    </html>
-  `
+  // O documento é montado com template literal comum (não com htmlString)
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <title>${escapeHtml(post.title)}</title>
+  </head>
+  <body>
+    <div id="app">${html}</div>
+    <script id="__LOADER_DATA__" type="application/json">${loaderData}</script>
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>`
 }
 ```
+
+:::caution[Texto de usuário no SSR]
+No SSR toda string interpolada é escapada, então `post.title`, `post.content`, `user.name` e `user.email` podem ir direto no `htmlString`. Se `post.content` for HTML que você já passou por um sanitizador de verdade, embrulhe o resultado com `unsafeHtml(...)` (de `@_bashell/slash/ssr`); ele **não sanitiza** nada. No `<title>` do documento, montado à mão com template literal comum, use `escapeHtml`: o template literal não escapa nada por você (dentro de `htmlString`, o `escapeHtml` escaparia duas vezes).
+:::
 
 ### Cliente
 
@@ -787,5 +805,5 @@ console.log('Parsed:', data)
 ## Próximos Passos
 
 - Veja [SSR](/avancado/ssr) para renderização no servidor
-- Explore [Hydration](/avancado/hydration) para reconectar estados
+- Explore [Hydration](/avancado/hydration) para ver o que o cliente faz com o HTML do servidor
 - Confira exemplos no [template slash-ssr](https://github.com/bashell-rrocha/slash-ssr)

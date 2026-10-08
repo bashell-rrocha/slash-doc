@@ -7,7 +7,7 @@ import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
 
 ## O que é o Router?
 
-O Router do Slash é um sistema de roteamento **client-side** para criar Single Page Applications (SPAs). Ele permite navegar entre diferentes "páginas" sem recarregar o browser, mantendo a URL sincronizada com o conteúdo exibido.
+O Router do Slash é um sistema de roteamento para criar Single Page Applications (SPAs). Ele permite navegar entre diferentes "páginas" sem recarregar o browser, mantendo a URL sincronizada com o conteúdo exibido.
 
 ### Características principais
 
@@ -127,13 +127,13 @@ const router = createRouter({
 
 ### `<Router>`
 
-O componente `Router` renderiza o componente da rota atual:
+O componente `Router` renderiza o componente da rota atual e se atualiza a cada navegação. Use-o como componente, em qualquer posição do template:
 
 ```typescript
 import { html, render } from '@_bashell/slash'
-import { Router } from '@_bashell/slash'
+import { Router } from '@_bashell/slash/router'
 
-const app = html`
+const App = () => html`
   <div id="app">
     <nav>
       <a href="/">Home</a>
@@ -141,13 +141,15 @@ const app = html`
     </nav>
 
     <main>
-      ${Router({ router })}
+      <${Router} router=${router} />
     </main>
   </div>
 `
 
-render(app, document.getElementById('root')!)
+render(html`<${App} />`, document.getElementById('root')!)
 ```
+
+A forma direta `${Router({ router })}` também continua válida.
 
 ### `<Link>`
 
@@ -171,6 +173,15 @@ function Navigation({ router }) {
 <Aside type="note">
 O componente `Link` previne o comportamento padrão do navegador e usa `router.push()` internamente, evitando reloads desnecessários.
 </Aside>
+
+`Link` aceita **somente caminhos do app**: `/x`, `?q` ou `#h`. Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) nunca navega: o `href` vira `about:blank#blocked` e o dev mode avisa. Para um link externo de verdade, use a prop `external`:
+
+```typescript
+html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
+// <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
+```
+
+`external` só libera `http(s)`, `mailto:`, `tel:` e `sms:` e adiciona `rel="noopener noreferrer"`. `?q` e `#h` são relativos à página atual. O roteador só intercepta cliques em links `http(s)` da mesma origem (respeitando `<base>`); com ctrl, meta, shift ou alt, botão que não seja o esquerdo, `target` diferente de `_self` ou `download`, o navegador age normalmente. Barras invertidas em `router.push()` viram o caminho da mesma origem (`'/\\evil'` vai para `/evil`), e um `push` recusado pelo navegador rejeita com `Navigation failed: ...` sem dessincronizar o roteador. Veja [Segurança](/fundamentos/seguranca/).
 
 ## Parâmetros dinâmicos
 
@@ -248,7 +259,7 @@ const router = createRouter({
 ```
 
 <Aside type="tip">
-Query params são sempre strings. Converta para números se necessário: `const page = parseInt(state.query.page || '1', 10)`
+Query params são sempre strings. Converta para números se necessário: `const page = parseInt(state.query.page || '1', 10)`. O objeto `query` não tem protótipo (`Object.create(null)`): para testar uma chave use `'q' in state.query` ou `Object.hasOwn(state.query, 'q')`, não `state.query.hasOwnProperty('q')`.
 </Aside>
 
 ## Navegação programática
@@ -278,9 +289,10 @@ router.go(1)  // avança 1 página
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
-function LoginForm({ router }) {
-  const credentials = createState({ email: '', password: '' })
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const credentials = createState({ email: '', password: '' })
 
+function LoginForm({ router }) {
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
 
@@ -384,7 +396,7 @@ const Home = () => html`
   </div>
 `
 
-const PostList = (state) => {
+const PostList = () => {
   const posts = [
     { id: 1, title: 'Introdução ao Slash' },
     { id: 2, title: 'Roteamento Avançado' },
@@ -397,7 +409,7 @@ const PostList = (state) => {
       <ul>
         ${posts.map(post => html`
           <li>
-            <${Link} to=${`/posts/${post.id}`} router=${state.__router}>
+            <${Link} to=${`/posts/${post.id}`} router=${router}>
               ${post.title}
             </${Link}>
           </li>
@@ -414,7 +426,7 @@ const PostDetail = (state) => {
     <div>
       <h1>Post #${postId}</h1>
       <p>Conteúdo do post...</p>
-      <button onClick=${() => state.__router.back()}>
+      <button onClick=${() => router.back()}>
         Voltar
       </button>
     </div>
@@ -440,17 +452,6 @@ const router = createRouter({
   ]
 })
 
-// Injetar router no state para uso nos componentes
-const enhancedRouter = {
-  ...router,
-  get() {
-    return {
-      ...router.get(),
-      __router: router
-    }
-  }
-}
-
 // Renderizar app
 const app = html`
   <div id="app">
@@ -460,7 +461,7 @@ const app = html`
     </nav>
 
     <main>
-      ${Router({ router: enhancedRouter })}
+      <${Router} router=${router} />
     </main>
   </div>
 `
@@ -468,8 +469,35 @@ const app = html`
 render(app, document.getElementById('root')!)
 ```
 
+## Router no servidor (SSR)
+
+Passe `initialPath` para que o roteador resolva a rota de forma síncrona na criação (no servidor e na hidratação). No cliente, sem `initialPath`, ele usa `window.location`.
+
+No servidor, `Router` funciona dentro de `htmlString`/`renderToString`: o HTML da rota é emitido de verdade, entre marcadores `<!--reactive-start:id-->`, e **não** é gravado no `state` serializado.
+
+```typescript
+import { createRouter, Router } from '@_bashell/slash/router'
+import { htmlString, renderToString } from '@_bashell/slash/ssr'
+
+const router = createRouter({
+  routes: [{ path: '/', component: () => htmlString`<h1>Home</h1>` }],
+  initialPath: '/',
+})
+
+const { html } = renderToString(
+  () => htmlString`<main>${Router({ router })}</main>`,
+)
+// <main><!--reactive-start:s0--><h1>Home</h1><!--reactive-end:s0--></main>
+```
+
+<Aside type="caution">
+No SSR, toda string é escapada. Os componentes das rotas devem devolver `htmlString` (ou `unsafeHtml(...)` para marcação confiável): uma string comum devolvida por uma rota aparece como texto. Veja [Segurança](/fundamentos/seguranca/).
+</Aside>
+
+Veja [SSR](/avancado/ssr/) para o fluxo completo de renderização e hidratação.
+
 ## Próximos passos
 
 - [Navigation Guards](/roteamento/guards/) - Proteção e controle de navegação
 - [Rotas Aninhadas](/roteamento/nested/) - Estrutura de rotas hierárquicas
-- [SSR com Router](/ssr/roteamento/) - Roteamento no servidor
+- [SSR com Router](/avancado/ssr/) - Roteamento no servidor

@@ -3,7 +3,6 @@ title: Batch Updates
 description: Otimize múltiplas atualizações de estado
 ---
 
-
 ## Função `batch()` para Agrupar Atualizações
 
 A função `batch()` agrupa múltiplas atualizações de estado, notificando watchers **apenas uma vez** ao final do batch em vez de notificar após cada `set()`.
@@ -68,21 +67,30 @@ batch(() => {
 // Log: "State changed: { count: 3, name: 'Jane' }" (apenas uma vez)
 ```
 
+### Semântica
+
+- Só são notificados os states que **mudaram de valor** dentro do batch. States não alterados não notificam, e um batch em que nenhum `set` mudou valor não notifica ninguém.
+- Cada state alterado notifica **uma única vez**, com o **valor final**, na ordem em que foi alterado pela primeira vez. Qualquer `set` que muda o valor marca o state como pendente, mesmo que ele volte ao valor inicial.
+- Batches **aninhados** são suportados: o fim do batch interno não encerra o externo, e as notificações só ocorrem no fim do batch **mais externo**.
+- Se a função lançar um erro, as notificações ainda acontecem e o erro é propagado.
+- Um `set` feito por um watcher durante as notificações (já fora do batch) notifica normalmente.
+- Esse `set` segue a regra "o último valor vence": nenhum watcher recebe um valor velho depois do novo. Veja [Estado](/fundamentos/estado/).
+- Erros em watchers são isolados, dentro e fora de batch: todos os watchers rodam e o primeiro erro é relançado no final. Se `fn` e um watcher lançarem, o erro de `fn` é o propagado e o do watcher é registrado com `console.error("[slash] erro em watcher durante o flush do batch", err)`.
+- Se um watcher altera um state cuja notificação ainda estava pendente no mesmo flush, esse state notifica uma única vez com o valor mais recente (sem duplicar).
+
 ### Estado Interno
 
-Batch mantém um contador de updates pendentes:
+Batch mantém um contador de profundidade e uma fila de notificadores pendentes:
 
 ```typescript
-interface BatchContext {
-  status: 'IDLE' | { type: 'BATCHING', pendingUpdates: number }
-}
+function enterBatch(depth: number): number
+function exitBatch(depth: number): { depth: number; flush: boolean }
 ```
 
 **Fluxo:**
-1. `batch()` called → status = BATCHING, pendingUpdates = 0
-2. `state.set()` → pendingUpdates++
-3. `state.set()` → pendingUpdates++
-4. Batch ends → Notifica watchers se pendingUpdates > 0 → status = IDLE
+1. `batch()` called → profundidade++
+2. `state.set()` que muda o valor → enfileira o notificador do state (deduplicado)
+3. Batch termina → profundidade--; se voltou a 0, cada notificador pendente roda uma vez
 
 **Implementação Core:** [src/batch-core.ts](../../src/batch-core.ts:1)
 
@@ -112,7 +120,7 @@ const loadUser = async (id: number) => {
   }
 }
 
-// ✅ Com batch: 1 ou 2 notificações (início + fim/erro)
+// ✅ Com batch: as atualizações de cada etapa são notificadas juntas
 const loadUser = async (id: number) => {
   batch(() => {
     isLoading.set(true)
@@ -237,23 +245,16 @@ batch(() => {
 console.timeEnd('with-batch')
 ```
 
-### Benchmarks Típicos
+### Resultados
 
-| Operação | Sem Batch | Com Batch | Ganho |
-|----------|-----------|-----------|-------|
-| 100 updates | 100ms | 1ms | 100x |
-| 1000 updates | 1000ms | 1ms | 1000x |
-| 10 states, 10 updates cada | 100ms | 10ms | 10x |
-
-**Nota:** Ganhos reais dependem da complexidade dos watchers e do DOM.
+Os ganhos dependem do custo dos watchers (e do DOM que eles tocam): meça no seu caso com o código acima.
 
 ### Otimizações Automáticas
 
 Slash já otimiza internamente:
 
-1. **Deep Equality**: Não notifica se valor não mudou
-2. **Lazy Evaluation**: Props reativas são avaliadas apenas quando necessário
-3. **Granular Updates**: Apenas elementos afetados são atualizados
+1. **Deep Equality**: não notifica se o valor não mudou
+2. **Re-render por componente**: só componentes que leram o state alterado executam de novo
 
 Batch adiciona uma camada extra de otimização para cenários específicos.
 
@@ -291,39 +292,61 @@ const loadUserData = (userId: number) => {
   })
 }
 
+// Binding reativo { get, subscribe }: o atributo `value` acompanha o state
+// sem recriar o <input> (e sem perder o foco)
+function field<K extends keyof FormData>(key: K) {
+  return {
+    get: () => form.get()[key],
+    subscribe: (fn: (value: FormData[K]) => void) => form.watch((s) => fn(s[key])),
+  }
+}
+
+// Componente pequeno: só ele re-renderiza quando o form muda
+const Summary = () => html`
+  <p>${form.get().name} / ${form.get().email} / ${form.get().age}</p>
+`
+
+// O formulário em si não lê `form.get()` diretamente
 const FormComponent = () => html`
   <form>
     <input
       type="text"
       placeholder="Name"
-      value=${form.get().name}
-      oninput=${(e: Event) =>
+      value=${field('name')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), name: (e.target as HTMLInputElement).value })
       }
     />
     <input
       type="email"
       placeholder="Email"
-      value=${form.get().email}
-      oninput=${(e: Event) =>
+      value=${field('email')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })
       }
     />
     <input
       type="number"
       placeholder="Age"
-      value=${form.get().age}
-      oninput=${(e: Event) =>
+      value=${field('age')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), age: Number((e.target as HTMLInputElement).value) })
       }
     />
-    <button type="button" onclick=${resetForm}>Reset</button>
-    <button type="button" onclick=${() => loadUserData(1)}>Load User</button>
+    <button type="button" onClick=${resetForm}>Reset</button>
+    <button type="button" onClick=${() => loadUserData(1)}>Load User</button>
+    <${Summary} />
   </form>
 `
 
+// Chamada direta: o form não vira dependência do state, então os inputs
+// mantêm o foco ao digitar. Reset e Load atualizam os campos via binding.
 render(FormComponent(), '#app')
 ```
+
+:::note
+`batch` garante que Reset e Load notifiquem uma única vez, com o valor final. O padrão de campos sem re-render do formulário é explicado em [Formulários](/formularios/conceitos/).
+:::
 
 ### Exemplo 2: Lista com Filtros
 
@@ -390,27 +413,34 @@ const setFilter = (newFilter: 'all' | 'active' | 'completed') => {
   })
 }
 
+// A lista fica em um componente próprio: só ele lê `filteredTodos`
+const TodoList = () => html`
+  <ul>
+    ${filteredTodos.get().map(todo => html`
+      <li>${todo.text}</li>
+    `)}
+  </ul>
+`
+
+// TodoApp não lê nenhum state no render, então o <input> de busca
+// nunca é recriado e não perde o foco enquanto o usuário digita
 const TodoApp = () => html`
   <div>
     <input
       type="text"
       placeholder="Search..."
-      oninput=${(e: Event) => searchQuery.set((e.target as HTMLInputElement).value)}
+      onInput=${(e: Event) => searchQuery.set((e.target as HTMLInputElement).value)}
     />
     <div>
-      <button onclick=${() => setFilter('all')}>All</button>
-      <button onclick=${() => setFilter('active')}>Active</button>
-      <button onclick=${() => setFilter('completed')}>Completed</button>
+      <button onClick=${() => setFilter('all')}>All</button>
+      <button onClick=${() => setFilter('active')}>Active</button>
+      <button onClick=${() => setFilter('completed')}>Completed</button>
     </div>
-    <ul>
-      ${filteredTodos.get().map(todo => html`
-        <li>${todo.text}</li>
-      `)}
-    </ul>
+    <${TodoList} />
   </div>
 `
 
-render(TodoApp(), '#app')
+render(html`<${TodoApp} />`, '#app')
 ```
 
 ### Exemplo 3: Data Fetching com Loading States
@@ -479,8 +509,8 @@ const UserProfile = () => {
 
 render(html`
   <div>
-    ${UserProfile()}
-    <button onclick=${() => fetchUser(1)}>Load User 1</button>
+    <${UserProfile} />
+    <button onClick=${() => fetchUser(1)}>Load User 1</button>
   </div>
 `, '#app')
 ```
@@ -533,45 +563,41 @@ const AnimatedElement = () => html`
   ></div>
 `
 
-render(AnimatedElement(), '#app')
+render(html`<${AnimatedElement} />`, '#app')
 animateElement()
 ```
 
 ## Integração com State Management
 
-### Batch é Automático em Alguns Casos
+### `set()` respeita o batch
 
-Slash integra batch automaticamente no sistema de estado:
+`set()` consulta o contexto de batch interno, então você não precisa passar nada para `createState`:
 
 ```typescript
 // state.ts (interno)
 const set = (payload: S) => {
   // ...
 
-  if (isInBatch()) {
-    __recordBatchUpdate() // Apenas registra
-  } else {
-    _notifyHandlers(deepClone(_state)) // Notifica imediatamente
+  if (shouldNotifyWatchers(command)) {
+    if (isInBatch()) {
+      __enqueueBatchNotify(_notifyFinal) // Enfileira o notificador (deduplicado)
+    } else {
+      _notifyHandlers(deepClone(_state)) // Notifica imediatamente
+    }
   }
 }
 ```
 
-**Implementação:** [src/state.ts](../../src/state.ts:66-91)
+**Implementação:** `src/state.ts` (trecho simplificado)
 
 ### Verificar se Está em Batch
 
-```typescript
-import { isInBatch } from '@_bashell/slash'
-
-if (isInBatch()) {
-  console.log('Currently batching updates')
-}
-```
+`isInBatch()` existe em `src/batch.ts`, mas é de uso interno e **não** é exportado pelos subpaths públicos (`core`, `router`, `forms`, `ssr`) nem pelo bundle principal. Os subpaths exportam apenas `batch`.
 
 ## Próximos Passos
 
 Agora que você domina batch updates, explore:
 
-1. [Componentes](../06-components/README.md) - Criar componentes reutilizáveis
-2. [Performance e Best Practices](../14-performance/README.md) - Otimizações avançadas
-3. [Router](../07-router/README.md) - Roteamento com state management
+1. [Componentes](/fundamentos/componentes/) - Criar componentes reutilizáveis
+2. [Performance](/guias/performance/) - Otimizações avançadas
+3. [Router](/avancado/router/) - Roteamento com state management

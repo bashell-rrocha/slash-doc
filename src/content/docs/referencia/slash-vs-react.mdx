@@ -16,13 +16,11 @@ Esta página compara Slash e React em termos de arquitetura, performance, DX (De
 
 | Aspecto | Slash | React |
 |---------|-------|-------|
-| **Tamanho** | ~5KB | ~42KB (React + ReactDOM) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
-| **Reatividade** | Observer Pattern (fine-grained) | Re-render component tree |
-| **SSR** | ✅ Nativo | ✅ Sim (com frameworks) |
+| **Reatividade** | Observer Pattern (re-render por componente que lê o state) | Re-render component tree |
+| **SSR** | ✅ `renderToString`/`renderToStream` no pacote | ✅ `react-dom/server` (frameworks adicionam roteamento e data loading) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro e extenso |
 | **Curva de Aprendizado** | Baixa | Média |
-| **Performance** | Excelente | Boa (com otimizações) |
 | **Tooling** | TypeScript nativo | Excelente (DevTools, etc) |
 
 ---
@@ -63,23 +61,24 @@ function Counter() {
 
 ### Slash: Observer Pattern (Sem VDOM)
 
-Slash usa um sistema de estado reativo baseado em Observer Pattern que atualiza o DOM diretamente:
+Slash usa um sistema de estado reativo baseado em Observer Pattern: um componente que lê `state.get()` re-executa quando o state muda e seus nós são substituídos, sem diff de Virtual DOM:
 
 ```typescript
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
+
+// Monte como <${Counter} />
 function Counter() {
-  const count = createState(0)
+  // Componente re-executa quando count muda (porque leu count.get())
+  console.log('Component rendered')
 
-  // Componente NÃO re-executa quando count muda
-  console.log('Component created')
-
-  // Apenas este texto atualiza
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -89,60 +88,24 @@ function Counter() {
 
 **Como funciona:**
 1. State muda via `count.set()`
-2. Slash atualiza apenas o nó DOM específico
-3. Componente NÃO re-executa
+2. O componente que leu `count.get()` executa de novo
+3. Os nós anteriores do componente são substituídos pelos novos
 4. Sem diff de Virtual DOM
-5. Update extremamente eficiente
+5. A granularidade é o componente: divida a interface em componentes pequenos para re-renderizar só o necessário
 
 <Aside type="note">
-A principal diferença: React re-executa componentes, Slash atualiza DOM diretamente via Observer Pattern com state reativo.
+A principal diferença: React reconcilia uma árvore virtual, Slash substitui os nós dos componentes que leram o state alterado, sem Virtual DOM.
 </Aside>
 
 ---
 
 ## Performance
 
-### Bundle Size
+### Benchmarks e tamanho
 
-```bash
-# Slash (produção, minified + gzip)
-@_bashell/slash: ~5KB
+Esta página não traz benchmarks nem comparação de tamanho com o React: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-# React (produção, minified + gzip)
-react + react-dom: ~42KB
-```
-
-**Impacto:** Slash é ~8x menor, crucial para mobile e slow networks.
-
-### Runtime Performance
-
-<Tabs>
-  <TabItem label="Benchmark: 10.000 Updates">
-
-**Cenário:** 10.000 updates em lista de 1.000 itens
-
-| Biblioteca | Tempo | Memória |
-|------------|-------|---------|
-| **Slash** | 120ms | 15MB |
-| **React** | 380ms | 45MB |
-| **React (memo)** | 180ms | 30MB |
-
-  </TabItem>
-
-  <TabItem label="Benchmark: Deep Tree">
-
-**Cenário:** Árvore de componentes 10 níveis de profundidade
-
-| Biblioteca | First Render | Re-render |
-|------------|--------------|-----------|
-| **Slash** | 8ms | 2ms |
-| **React** | 18ms | 12ms |
-| **React (memo)** | 18ms | 4ms |
-
-  </TabItem>
-</Tabs>
-
-**Veredito:** Slash é mais rápido por padrão. React precisa de otimizações (`memo`, `useMemo`, `useCallback`) para competir.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **≈ 8,3 KB gzip**. O número depende do que seu app importa.
 
 ---
 
@@ -176,14 +139,16 @@ function Greeting({ name }) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Greeting({ name }) {
-  const count = createState(0)
+// Slash não tem estado local por instância: o state vive fora do componente
+// (dentro dele seria recriado a cada render). Monte como <${Greeting} name="..." />
+const count = createState(0)
 
+function Greeting({ name }) {
   return html`
     <div>
       <h1>Hello ${name}</h1>
       <p>Clicked ${count.get()} times</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Click
       </button>
     </div>
@@ -218,16 +183,16 @@ function Timer() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Slash não tem useEffect nem onCleanup: o efeito vive fora do componente
+// e você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  // Cleanup automático quando componente desmonta
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>Seconds: ${seconds.get()}</p>`
 }
 ```
@@ -270,28 +235,23 @@ function LoginForm() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function LoginForm() {
-  const email = createState('')
-  const password = createState('')
+const form = createState({ email: '', password: '' })
 
+// Os campos não leem o state no render, então não são recriados a cada tecla
+function LoginForm() {
   const handleSubmit = (e: Event) => {
     e.preventDefault()
-    console.log({
-      email: email.get(),
-      password: password.get()
-    })
+    console.log(form.get())
   }
 
   return html`
-    <form onsubmit=${handleSubmit}>
+    <form onSubmit=${handleSubmit}>
       <input
-        value=${email.get()}
-        oninput=${(e) => email.set(e.target.value)}
+        onInput=${(e: Event) => form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })}
       />
       <input
         type="password"
-        value=${password.get()}
-        oninput=${(e) => password.set(e.target.value)}
+        onInput=${(e: Event) => form.set({ ...form.get(), password: (e.target as HTMLInputElement).value })}
       />
       <button type="submit">Login</button>
     </form>
@@ -304,7 +264,7 @@ function LoginForm() {
 
 **Observações:**
 - React tem mais boilerplate (`useState`, `useEffect`, etc)
-- Slash é mais direto (state reativo e cleanup simples)
+- Slash é mais direto, mas não tem estado local nem hooks de efeito: o state fica fora do componente e efeitos/cleanup são por sua conta
 - Ambos têm boa DX, mas Slash é mais minimalista
 
 ---
@@ -352,7 +312,7 @@ npm install redux
 - 🎯 Ideal para apps pequenos/médios
 
 <Aside type="tip">
-Se você precisa de um ecossistema maduro e extenso, React é a escolha mais segura. Se valoriza simplicidade e performance, Slash é excelente.
+Se você precisa de um ecossistema maduro e extenso, React é a escolha mais segura. Se valoriza simplicidade e uma API pequena, Slash pode ser uma boa escolha.
 </Aside>
 
 ---
@@ -382,14 +342,14 @@ Se você precisa de um ecossistema maduro e extenso, React é a escolha mais seg
 
 ### Quando Usar Slash
 
-1. **Performance Crítica**
-   - SPAs que precisam ser extremamente rápidas
-   - Dispositivos móveis de baixo custo
-   - Aplicações em tempo real
+1. **Controle sobre o DOM**
+   - Atualizações diretas, sem Virtual DOM
+   - Integração com código DOM existente
+   - Aplicações com poucas dependências
 
 2. **Bundle Size Limitado**
-   - PWAs com strict budget
-   - Sites com slow networks
+   - Um app mínimo mede ≈ 8,3 KB gzip (veja a seção Performance)
+   - Quando cada dependência conta
    - Embedded apps
 
 3. **Simplicidade e Rapidez de Desenvolvimento**
@@ -421,7 +381,7 @@ Se você precisa de um ecossistema maduro e extenso, React é a escolha mais seg
 
 **O que muda:**
 - `useState` → `createState`
-- `useEffect` → `state.watch()` ou `onCleanup`
+- `useEffect` → `state.watch()` (criado fora do componente; não há `onCleanup` público)
 - `useMemo` → Não necessário (pode usar funções puras)
 - JSX → `html` template tag (ou hyperscript)
 
@@ -453,19 +413,22 @@ function TodoItem({ todo, onToggle }) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+// Sem estado local por instância: guarde qual item está em edição fora do componente
+const editingId = createState<number | null>(null)
+
 function TodoItem({ todo, onToggle }) {
-  const isEditing = createState(false)
+  const isEditing = editingId.get() === todo.id
 
   return html`
     <li>
-      ${isEditing.get() ? html`
+      ${isEditing ? html`
         <input value=${todo.text} />
       ` : html`
-        <span onclick=${() => onToggle(todo.id)}>
+        <span onClick=${() => onToggle(todo.id)}>
           ${todo.text}
         </span>
       `}
-      <button onclick=${() => isEditing.set(!isEditing.get())}>
+      <button onClick=${() => editingId.set(isEditing ? null : todo.id)}>
         Edit
       </button>
     </li>
@@ -487,17 +450,15 @@ function TodoItem({ todo, onToggle }) {
 - ✅ React Native para mobile
 
 **Contras:**
-- ❌ Bundle size maior
-- ❌ Performance requer otimizações
+- ❌ Mais dependências (`react` e `react-dom`)
 - ❌ Mais boilerplate (hooks, etc)
 - ❌ Re-renders podem ser confusos
-- ❌ Necessita frameworks para SSR
+- ❌ SSR com roteamento e data loading costuma exigir um framework
 
 ### Slash
 
 **Prós:**
-- ✅ Extremamente leve (~5KB)
-- ✅ Performance excelente por padrão
+- ✅ Bundle pequeno (app mínimo medido em ≈ 8,3 KB gzip, veja a seção Performance)
 - ✅ API minimalista e direta
 - ✅ SSR nativo
 - ✅ TypeScript first-class
@@ -522,8 +483,8 @@ function TodoItem({ todo, onToggle }) {
 - Valoriza estabilidade e padrões
 
 **Escolha Slash se:**
-- Performance é crítica
-- Bundle size é limitação
+- Quer uma biblioteca pequena e sem dependências
+- Bundle size é limitação (app mínimo: ≈ 8,3 KB gzip)
 - Prefere simplicidade
 - Gosta de controle direto
 - App pequena/média

@@ -42,16 +42,21 @@ Em dev mode, Slash emite warnings úteis no console quando detecta problemas:
 
 ### Tipos de Warnings
 
-**1. Props inválidas:**
+**1. Props e valores bloqueados pela política de segurança:**
 ```typescript
 import { html } from '@_bashell/slash'
 
-// ⚠️ Warning: Unknown prop "onclick" (should be "onClick")
-html`<button onclick=${() => {}}>Click</button>`
+// ⚠️ onclick only accepts a function, a handleEvent object or a [fn, options] tuple; ...
+html`<button onclick="alert(1)">Click</button>`
+
+// ⚠️ Blocked URL in href: "javascript:alert(1)". For a trusted URL use unsafeUrl()
+html`<a href=${'javascript:alert(1)'}>Open</a>`
 
 // ✅ Correto
 html`<button onClick=${() => {}}>Click</button>`
 ```
+
+Cada bloqueio de segurança (`innerHTML`, `srcdoc`, URLs, `style`, handlers que não são função, `Link` com caminho inválido) emite um aviso por tipo, com a correção sugerida. Veja [Segurança](/fundamentos/seguranca/).
 
 **2. State mutations:**
 ```typescript
@@ -316,7 +321,7 @@ const Component = () => {
   return result
 }
 
-render(Component(), '#app')
+render(html`<${Component} />`, '#app')
 ```
 
 ### Performance Marks
@@ -412,19 +417,7 @@ bun run build
 
 ### Bundle Size
 
-Slash é extremamente leve:
-
-| Build | Tamanho (min+gzip) |
-|-------|-------------------|
-| Core (state + render) | ~3KB |
-| Full (com router, forms, SSR) | ~8KB |
-| Dev warnings | ~1KB (removido em prod) |
-
-**Comparação com outras libs:**
-- React: ~45KB
-- Vue: ~33KB
-- Solid: ~7KB
-- **Slash: ~8KB** ✅
+O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **≈ 8,3 KB gzip**. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
 
 ## Configuração Recomendada
 

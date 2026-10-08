@@ -40,16 +40,49 @@ Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bi
 
   <TabItem label="CDN">
   ```html
-  <!-- UMD build -->
-  <script src="https://unpkg.com/@_bashell/slash"></script>
-
-  <!-- ES Module -->
+  <!-- ES Module (via esm.sh) -->
   <script type="module">
     import { html, createState } from 'https://esm.sh/@_bashell/slash'
   </script>
   ```
   </TabItem>
 </Tabs>
+
+---
+
+## Migrando para 0.0.3
+
+A 0.0.3 torna o core **seguro por padrão**. Uma string é sempre texto, URLs e handlers são verificados e marcação confiável precisa de um tipo explícito. Isso traz mudanças incompatíveis: use a tabela abaixo para achar e corrigir cada caso. A explicação completa está em [Segurança](/fundamentos/seguranca/).
+
+| Se o seu código... | O que acontece agora | Como migrar |
+| --- | --- | --- |
+| usa ``htmlString`...` `` como `string` (`.length`, `+`, `.startsWith`, `res.send(x)`) | ele devolve um `SafeHtml` | use `String(x)` ou `renderToString(() => x).html` |
+| devolve HTML montado à mão de um componente ou helper (`return "<div>...</div>"`, Markdown, ícones) | a string aparece como texto visível | devolva um template `htmlString`/`html`; para marcação confiável use `unsafeHtml(str)` |
+| passa `innerHTML=${...}`, `outerHTML=...` ou `srcdoc=${...}` como prop | a prop é ignorada (aviso em dev) | use `unsafeHtml(...)` como filho; `srcdoc=${unsafeHtml(...)}` |
+| usa `javascript:`, `data:text/html`, `file:`, `whatsapp:`, `ftp:` ou outros esquemas próprios em `href`/`src`/`action` (passam `http`, `https`, `mailto`, `tel`, `sms`; `blob:` em `src` de mídia; `data:image/svg+xml` em `img` e `url()` de CSS) | o valor vira `about:blank#blocked` | use uma URL real, ou `unsafeUrl(url)` para uma URL confiável; valide entradas com `sanitizeUrl` |
+| usa `<${Link} to="./x">`, `to="../x"`, `to="about"` ou uma URL absoluta | não navega, `href` bloqueado | use um caminho do app (`/x`, `?q`, `#h`); para site externo, adicione `external` |
+| usa handlers em string (`onclick="..."`) ou um atributo comum que comece com `on` | toda prop `on*` que não seja função, objeto handler ou `[fn, opções]` é descartada (cliente e SSR) | passe uma função: `onClick=${fn}`; use `data-` nos atributos comuns |
+| escreve `<script>${json}</script>` ou `<style>${css}</style>` com valores dinâmicos (`html` ou `htmlString`) | strings, números, arrays, componentes e reativos dinâmicos são descartados, no cliente e no SSR (aviso em dev) | `unsafeHtml(serializeStateForScript(dados))` para JSON; mantenha CSS/JS estáticos |
+| coloca um `<` literal num `<script>` estático dentro do `htmlString` (`if (a < b)`) | o htm lê como tag | mova esse código para `unsafeHtml(...)` |
+| usa `<script id="__SLASH_STATE__">` sem `type` | o `render()` ignora o script (aviso em dev) | adicione `type="application/json"` |
+| passa props com nome de método do DOM (`click`, `focus`) ou `constructor` | a prop de método vira atributo e `constructor` é bloqueada | use `onClick=${fn}` para eventos |
+| tem estado circular ou aninhado em mais de 1000 níveis | `createState` lança `State is circular or nested deeper than 1000 levels` | achate o estado ou guarde ids em vez de referências |
+| compara mensagens de runtime em português (`URL bloqueada`...) em testes | as mensagens agora são em inglês | atualize o texto esperado |
+| depende de o roteador interceptar links `mailto:`, `tel:` ou de outra origem, ou de `?q`/`#h` relativos à rota | só links `http(s)` da mesma origem são interceptados; `?q` e `#h` são relativos à página atual | links normais não mudam; use `external` para outros sites |
+| interpola um `State` direto no SSR (`${state}`) | um `State` não é reativo no servidor | interpole `state.get()` |
+| embute estado com `JSON.stringify(state)` num `<script>` | quebra com `</script>` | `serializeStateForScript(state)` |
+| chama `__addBatchEndCallback`, `__removeBatchEndCallback` ou `__recordBatchUpdate` | removidos | use `batch()` e `state.watch()` |
+| monta um `RouterInstance` à mão (mock) | `ready` é obrigatório | adicione `ready: Promise.resolve()` |
+| chama `data.hasOwnProperty(...)` em `formToObject()` ou `router.query` | esses objetos não têm protótipo | `Object.hasOwn(data, "campo")` |
+| usava strings `style="..."` no cliente aplicadas como vieram | declarações inseguras são descartadas | use só valores CSS simples: sem comentários `/* */`, escapes só dentro de aspas, `url("a b.png")` com aspas se houver caracteres especiais, no máximo 8 KB |
+
+Quanto aos builds: Vite (dev) e webpack (`mode: "development"`) usam sozinhos o build de desenvolvimento, que mostra um aviso para cada bloqueio. O build de produção não traz esses avisos, mas mantém `console.error` para erros reais. Para ver os avisos fora de um bundler, rode com `--conditions=development`.
+
+Buscas rápidas para achar os casos no seu projeto:
+
+```bash
+grep -rnE "htmlString|innerHTML=|srcdoc=|href=\$\{|onclick=|JSON.stringify\(state" src
+```
 
 ---
 
@@ -61,12 +94,13 @@ Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bi
 |-------|-------|---------|
 | `useState()` | `createState()` | `const [count, setCount] = useState(0)` → `const count = createState(0)` |
 | `useEffect()` | `state.watch()` ou código direto | Ver exemplos abaixo |
-| `useMemo()` | Funções normais | Não necessário (reactive por natureza) |
+| `useMemo()` | Funções normais | Sem cache automático; calcule a partir de `state.get()` |
 | `useCallback()` | Funções normais | Não necessário |
-| `useRef()` | Variáveis locais | `let ref = null` |
-| `useContext()` | Estado global | `createState()` fora do componente |
+| `useRef()` | Variável fora do componente | O componente re-executa, então variáveis locais são recriadas |
+| `useContext()` / `useState()` | Estado fora do componente | `createState()` no módulo; não há estado local por instância |
 | `props` | Parâmetros de função | Idêntico |
 | JSX | `html` template tag | Ver exemplos |
+| `dangerouslySetInnerHTML` | `unsafeHtml(...)` como filho | `innerHTML` é bloqueado como prop; `unsafeHtml` não sanitiza (veja [Segurança](/fundamentos/seguranca/)) |
 
 ### Exemplo Prático de Migração
 
@@ -96,27 +130,28 @@ function Counter({ initialCount = 0 }) {
 
 ```typescript
 // Slash
-import { html, createState } from '@_bashell/slash'
+import { html, createState, type State } from '@_bashell/slash'
 
 interface CounterProps {
-  initialCount?: number
+  count: State<number> // o state é criado fora e passado por props
 }
 
-function Counter({ initialCount = 0 }: CounterProps) {
-  const count = createState(initialCount)
-
+// Monte como <${Counter} count=${count} />
+function Counter({ count }: CounterProps) {
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
-      <button onclick=${() => count.set(count.get() - 1)}>
+      <button onClick=${() => count.set(count.get() - 1)}>
         Decrement
       </button>
     </div>
   `
 }
+
+const count = createState(0) // valor inicial = o initialCount do React
 ```
 
   </TabItem>
@@ -146,18 +181,15 @@ function Example() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+
+// O efeito vive fora do componente (que re-executa a cada mudança)
+const unwatch = count.watch((newVal) => {
+  console.log('Count changed:', newVal)
+})
+// unwatch() quando não precisar mais: não há onCleanup público
+
 function Example() {
-  const count = createState(0)
-
-  const unwatch = count.watch((newVal, oldVal) => {
-    console.log('Count changed:', newVal)
-  })
-
-  onCleanup(() => {
-    console.log('Cleanup')
-    unwatch()
-  })
-
   return html`<p>${count.get()}</p>`
 }
 ```
@@ -201,29 +233,24 @@ function LoginForm() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function LoginForm() {
-  const email = createState('')
-  const password = createState('')
+const form = createState({ email: '', password: '' })
 
+// Os campos não leem o state no render, então não são recriados a cada tecla
+function LoginForm() {
   const handleSubmit = (e: Event) => {
     e.preventDefault()
-    console.log({
-      email: email.get(),
-      password: password.get()
-    })
+    console.log(form.get())
   }
 
   return html`
-    <form onsubmit=${handleSubmit}>
+    <form onSubmit=${handleSubmit}>
       <input
         type="email"
-        value=${email.get()}
-        oninput=${(e) => email.set(e.target.value)}
+        onInput=${(e) => form.set({ ...form.get(), email: e.target.value })}
       />
       <input
         type="password"
-        value=${password.get()}
-        oninput=${(e) => password.set(e.target.value)}
+        onInput=${(e) => form.set({ ...form.get(), password: e.target.value })}
       />
       <button type="submit">Login</button>
     </form>
@@ -259,12 +286,12 @@ function TodoList() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function TodoList() {
-  const todos = createState([
-    { id: 1, text: 'Learn Slash' },
-    { id: 2, text: 'Build app' }
-  ])
+const todos = createState([
+  { id: 1, text: 'Learn Slash' },
+  { id: 2, text: 'Build app' }
+])
 
+function TodoList() {
   return html`
     <ul>
       ${todos.get().map(todo => html`
@@ -289,7 +316,7 @@ Você pode migrar componente por componente sem reescrever tudo:
 ```typescript
 // React component que usa Slash component
 import { useEffect, useRef } from 'react'
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { SlashComponent } from './slash-components'
 
 function ReactWrapper() {
@@ -297,7 +324,7 @@ function ReactWrapper() {
 
   useEffect(() => {
     if (containerRef.current) {
-      render(SlashComponent(), containerRef.current)
+      render(html`<${SlashComponent} />`, containerRef.current)
     }
   }, [])
 
@@ -318,10 +345,11 @@ function ReactWrapper() {
 | `watch()` | `state.watch()` | API similar |
 | `v-if` | Ternário `? :` | JS nativo |
 | `v-for` | `.map()` | JS nativo |
-| `v-model` | `value` + `oninput` | Manual binding |
-| `onMounted()` | Código direto | Executa ao criar |
-| `onUnmounted()` | `onCleanup()` | Cleanup |
+| `v-model` | `onInput` + `state.set()` (ou `textFieldControl`) | Manual binding |
+| `onMounted()` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
+| `onUnmounted()` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 | Template | `html` tag | HTM syntax |
+| `v-html` | `unsafeHtml(...)` como filho | Só para marcação confiável e sanitizada |
 
 ### Exemplo de Migração
 
@@ -358,19 +386,20 @@ function increment() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+const doubled = () => count.get() * 2
+
+const increment = () => {
+  count.set(count.get() + 1)
+}
+
+// Monte como <${Counter} />
 function Counter() {
-  const count = createState(0)
-  const doubled = () => count.get() * 2
-
-  const increment = () => {
-    count.set(count.get() + 1)
-  }
-
   return html`
     <div>
       <p>Count: ${count.get()}</p>
       <p>Doubled: ${doubled()}</p>
-      <button onclick=${increment}>+</button>
+      <button onClick=${increment}>+</button>
     </div>
   `
 }
@@ -397,21 +426,21 @@ function Counter() {
   <script type="module">
     import { html, render, createState } from 'https://esm.sh/@_bashell/slash'
 
-    const App = () => {
-      const count = createState(0)
+    // O state fica fora do componente
+    const count = createState(0)
 
-      return html`
-        <div>
-          <h1>Hello Slash!</h1>
-          <p>Count: ${count.get()}</p>
-          <button onclick=${() => count.set(count.get() + 1)}>
-            Increment
-          </button>
-        </div>
-      `
-    }
+    const App = () => html`
+      <div>
+        <h1>Hello Slash!</h1>
+        <p>Count: ${count.get()}</p>
+        <button onClick=${() => count.set(count.get() + 1)}>
+          Increment
+        </button>
+      </div>
+    `
 
-    render(App(), document.getElementById('app'))
+    // Monte como <${App} /> para o componente ser reativo
+    render(html`<${App} />`, document.getElementById('app'))
   </script>
 </body>
 </html>
@@ -435,7 +464,7 @@ function UserWidget() {
   const state = globalState.get()
 
   if (!state.isLoggedIn) {
-    return html`<button onclick=${showLoginModal}>Login</button>`
+    return html`<button onClick=${showLoginModal}>Login</button>`
   }
 
   return html`<p>Welcome, ${state.user.name}!</p>`
@@ -459,7 +488,8 @@ $('#loginForm').on('submit', function(e) {
 })
 
 // Render componente Slash
-render(UserWidget(), document.getElementById('user-widget'))
+// Monte como <${UserWidget} />: ele lê globalState e re-renderiza quando o state muda
+render(html`<${UserWidget} />`, document.getElementById('user-widget'))
 ```
 
 ### 3. Web Components
@@ -471,20 +501,27 @@ import { html, render, createState } from '@_bashell/slash'
 
 class CounterElement extends HTMLElement {
   connectedCallback() {
+    // connectedCallback roda de novo se o elemento for movido ou reinserido:
+    // não chame attachShadow (lança erro) nem monte duas vezes
+    if (this.shadowRoot) return
     const shadow = this.attachShadow({ mode: 'open' })
 
+    // O state vive na instância, fora do componente
     const count = createState(0)
 
-    const Counter = html`
+    const Counter = () => html`
       <div>
         <p>Count: ${count.get()}</p>
-        <button onclick=${() => count.set(count.get() + 1)}>
+        <button onClick=${() => count.set(count.get() + 1)}>
           Increment
         </button>
       </div>
     `
 
-    render(Counter, shadow)
+    // render() exige um Element como container (ShadowRoot não serve)
+    const mount = document.createElement('div')
+    shadow.appendChild(mount)
+    render(html`<${Counter} />`, mount)
   }
 }
 
@@ -513,23 +550,21 @@ bun add @_bashell/slash
 import { html, render, createState } from '@_bashell/slash'
 import './style.css'
 
-const App = () => {
-  const count = createState(0)
+const count = createState(0)
 
-  return html`
-    <div>
-      <h1>Vite + Slash</h1>
-      <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
-        Increment
-      </button>
-    </div>
-  `
-}
+const App = () => html`
+  <div>
+    <h1>Vite + Slash</h1>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
+      Increment
+    </button>
+  </div>
+`
 
 const root = document.querySelector('#app')
 if (root) {
-  render(App(), root)
+  render(html`<${App} />`, root)
 }
 ```
 
@@ -551,20 +586,18 @@ bun add @_bashell/slash
 ```typescript title="index.ts"
 import { html, render, createState } from '@_bashell/slash'
 
-const App = () => {
-  const count = createState(0)
+const count = createState(0)
 
-  return html`
-    <div>
-      <h1>Bun + Slash</h1>
-      <button onclick=${() => count.set(count.get() + 1)}>
-        Count: ${count.get()}
-      </button>
-    </div>
-  `
-}
+const App = () => html`
+  <div>
+    <h1>Bun + Slash</h1>
+    <button onClick=${() => count.set(count.get() + 1)}>
+      Count: ${count.get()}
+    </button>
+  </div>
+`
 
-render(App(), document.body)
+render(html`<${App} />`, document.body)
 ```
 
 ```json title="package.json"
@@ -705,26 +738,28 @@ bun add -d @types/express
 
 ```typescript title="server.ts"
 import express from 'express'
-import { renderToString, htmlString } from '@_bashell/slash'
-import { App } from './App'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { App } from './App' // App usa htmlString no servidor
 
 const app = express()
 
 app.get('*', (req, res) => {
-  const appHtml = renderToString(App())
+  // renderToString devolve { html, state }
+  const { html: appHtml, state } = renderToString(() => App())
 
-  const html = htmlString`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>SSR App</title>
-        <script type="module" src="/client.js"></script>
-      </head>
-      <body>
-        <div id="app">${appHtml}</div>
-      </body>
-    </html>
-  `
+  // O documento é um template literal comum (htmlString com <!DOCTYPE> não funciona).
+  // O título é fixo aqui; se vier de dado de usuário, escape-o à mão.
+  const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>SSR App</title>
+    <script type="module" src="/client.js"></script>
+  </head>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+  </body>
+</html>`
 
   res.send(html)
 })
@@ -737,29 +772,29 @@ app.listen(3000, () => {
 ### Bun Server
 
 ```typescript title="server.ts"
-import { renderToString, htmlString } from '@_bashell/slash'
-import { App } from './App'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { App } from './App' // App usa htmlString no servidor
 
 Bun.serve({
   port: 3000,
   fetch(req) {
-    const appHtml = renderToString(App())
+    const { html: appHtml, state } = renderToString(() => App())
 
-    const html = htmlString`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>SSR App</title>
-        </head>
-        <body>
-          <div id="app">${appHtml}</div>
-          <script type="module" src="/client.js"></script>
-        </body>
-      </html>
-    `
+    // Template literal comum para o documento (não use htmlString com <!DOCTYPE>)
+    const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>SSR App</title>
+  </head>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`
 
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html' }
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   }
 })
@@ -905,6 +940,8 @@ export const uiState = createState({
 ```
 
 ### 4. Crie Helpers Reutilizáveis
+
+Chame esses helpers **fora** dos componentes (no módulo): um `createState()` dentro de um componente é recriado a cada render.
 
 ```typescript title="src/utils/form.ts"
 import { createState } from '@_bashell/slash'
