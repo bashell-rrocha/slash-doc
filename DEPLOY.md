@@ -1,5 +1,23 @@
 # Deploy da Documentação Slash para Cloudflare Pages
 
+## Deploy automático (padrão)
+
+O workflow `.github/workflows/deploy.yml` publica o site no projeto `slash-docs` do Cloudflare Pages
+sempre que a `main` recebe um push (git flow: `release/x.y.z` -> `main`). Também pode ser disparado
+manualmente em **Actions → deploy → Run workflow**.
+
+Ele precisa de dois secrets no repositório (configuração única):
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN -R bashell-rrocha/slash-doc   # token com Account > Cloudflare Pages > Edit
+gh secret set CLOUDFLARE_ACCOUNT_ID -R bashell-rrocha/slash-doc  # ID da conta (Workers & Pages, coluna da direita)
+```
+
+As dependências são instaladas com `bun install --frozen-lockfile` a partir do `bun.lock` deste repositório.
+Ao mudar dependências, rode `bun install` aqui e faça commit do `bun.lock`.
+
+O restante deste documento descreve o deploy manual (pela sua máquina), útil como alternativa.
+
 ## Pré-requisitos
 
 1. **Conta Cloudflare** (gratuita)
@@ -79,23 +97,6 @@ Após o primeiro deploy:
 - Pode levar de 5 minutos a 48 horas (geralmente ~15 minutos)
 - Teste com: `dig slash.bashell.com.br`
 - O SSL será provisionado automaticamente pelo Cloudflare
-
-## Deploy automático via Git (Opcional)
-
-Para deploy automático a cada push:
-
-1. No Cloudflare Dashboard:
-   - Workers & Pages > slash-docs > Settings
-   - Connect to Git
-   - Conecte seu repositório GitHub
-   - Configure:
-     ```
-     Build command:    bun run build
-     Build directory:  packages/doc
-     Output directory: dist
-     ```
-
-2. Cada push na branch principal fará deploy automático
 
 ## Verificar deploy
 
