@@ -18,7 +18,7 @@ Este exemplo demonstra como criar uma Single Page Application (SPA) usando o rot
 - ✅ Route params e query strings
 - ✅ Navigation guards (redirecionam com uma string de caminho)
 - ✅ Fallback 404
-- ✅ Hash mode e History mode
+- ✅ Hash mode e History mode (em hash mode, links diretos como `/#/products?category=books` funcionam)
 
 <Aside type="note">
 O roteador não oferece lazy loading, data loaders, transições, curingas (`*`) nem hooks `beforeEach`/`afterEach`. Para observar a navegação use `router.watch()`; para o 404 use `fallback`. Veja [Roteamento](/roteamento/conceitos/).
@@ -76,43 +76,28 @@ export interface RouteParams {
 import { createState } from '@_bashell/slash'
 import type { User } from '../types'
 
-// Estado de autenticação
-export const authState = createState<{
+type AuthState = {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-}>({
-  user: null,
-  isAuthenticated: false,
-  isLoading: true
-})
-
-// Carrega usuário do localStorage ao iniciar
-export const initAuth = (): void => {
-  const savedUser = localStorage.getItem('user')
-  if (savedUser) {
-    try {
-      const user = JSON.parse(savedUser)
-      authState.set({
-        user,
-        isAuthenticated: true,
-        isLoading: false
-      })
-    } catch (e) {
-      authState.set({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false
-      })
-    }
-  } else {
-    authState.set({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false
-    })
-  }
 }
+
+// Lê o usuário salvo de forma síncrona: o guard roda na primeira navegação, que
+// começa assim que o router é criado. O estado precisa estar pronto antes disso.
+const loadSavedAuth = (): AuthState => {
+  try {
+    const saved = localStorage.getItem('user')
+    if (saved) {
+      return { user: JSON.parse(saved) as User, isAuthenticated: true, isLoading: false }
+    }
+  } catch {
+    // JSON inválido ou localStorage indisponível: segue como visitante
+  }
+  return { user: null, isAuthenticated: false, isLoading: false }
+}
+
+// Estado de autenticação (já carregado do localStorage)
+export const authState = createState<AuthState>(loadSavedAuth())
 
 // Login
 export const login = async (email: string, password: string): Promise<void> => {
@@ -154,6 +139,10 @@ export const hasRole = (role: string): boolean => {
 
 ## Configuração do Router
 
+<Aside type="note" title="Import circular é seguro aqui">
+`router.ts` importa as páginas, e `Header` e `NotFound` importam `router`. Esse ciclo de módulos ESM funciona porque as páginas só usam `router` **dentro das funções dos componentes**, que rodam depois de todos os módulos terem sido avaliados, nunca no nível superior do módulo. Se alguma página lesse `router` ao ser importada, o resultado seria um erro de acesso antes da inicialização. Para evitar o ciclo por completo, passe o router por props ou crie uma função `getRouter()`.
+</Aside>
+
 As rotas são funções `component(state)` que recebem o `RouterState` (com `params`, `query`, `meta`) e devolvem um template. Cada rota monta a página como componente (`<${Page} />`), para que a página re-renderize quando os states que ela lê mudarem. Guards devolvem `true`/`void` para permitir, `false` para bloquear ou **uma string** com o caminho de redirecionamento:
 
 ```typescript title="src/router.ts"
@@ -190,7 +179,7 @@ const routes: RouteConfig[] = [
 ]
 
 export const router = createRouter({
-  mode: 'history', // ou 'hash'
+  mode: 'history', // ou 'hash': a URL fica /#/products e a rota inicial vem de location.hash
   routes,
   fallback: '/404' // caminho usado quando nenhuma rota casa
 })
@@ -201,6 +190,25 @@ router.watch((state) => {
   if (title) document.title = `${title} - My SPA`
 })
 ```
+
+### Guards e a URL inicial
+
+O guard também roda na **primeira navegação**, quando o usuário abre `/dashboard` direto pela barra de endereço ou por um link salvo. Enquanto ele decide, o estado do router é `currentRoute: null, isNavigating: true`, então a página protegida **não é renderizada nem aparece por um instante** (sem flash). Depois da decisão vem a rota pedida, o destino do redirect (aqui `/login?redirect=...`) ou, se o guard devolver `false`, `currentRoute: null`: trate esse caso com uma tela vazia ou de erro.
+
+Se você precisar esperar a navegação inicial terminar (por exemplo, para medir ou para só então esconder um splash), use `await router.ready`:
+
+```typescript
+import { router } from './router'
+
+await router.ready // resolve quando a navegação inicial termina (redirects incluídos)
+console.log(router.get().currentRoute?.path)
+```
+
+Cada navegação segue no máximo 10 redirects encadeados, e uma navegação mais nova substitui uma anterior ainda pendente.
+
+<Aside type="caution" title="Guards no cliente são UX, não segurança">
+O guard só decide o que o navegador mostra; qualquer pessoa pode alterar o JavaScript ou chamar a API diretamente. A autorização de verdade precisa acontecer no **servidor** (verifique a sessão em cada requisição da API e nas páginas renderizadas por SSR). No SSR os guards não rodam.
+</Aside>
 
 <Aside type="note">
 As rotas são testadas na ordem em que foram declaradas e vence a primeira que casar. O estado `query` vem da URL: `/products?category=electronics` gera `{ category: 'electronics' }`.
@@ -553,13 +561,11 @@ export const Layout = () => html`
 ```typescript title="src/index.ts"
 import { html, render } from '@_bashell/slash'
 import { Layout } from './components/Layout'
-import { initAuth } from './services/auth'
 import './styles.css'
 
-// Inicializa autenticação (antes da primeira navegação protegida)
-initAuth()
-
-// O router resolve a rota atual na criação (usa window.location no cliente)
+// O router é criado quando './router' é importado (via Layout) e já começa a
+// navegação inicial pela URL atual (window.location). O estado de autenticação
+// é carregado na criação de `authState`, antes de qualquer guard rodar.
 const root = document.getElementById('app')
 if (root) {
   render(html`<${Layout} />`, root)
@@ -594,6 +600,10 @@ await router.replace('/login')
 router.currentRoute() // RouteMatch | null
 router.get()          // { currentRoute, params, query, meta, isNavigating }
 ```
+
+<Aside type="note">
+`Link` chama `router.push` e o roteador também intercepta cliques em `<a href>` internos; os dois não navegam duas vezes (cada clique gera uma única entrada no histórico). Em hash mode, o `href` do `Link` é o caminho puro (`/products`), então "abrir em nova aba" não vai para a rota em hash; para isso use um link `<a href="#/products">`.
+</Aside>
 
 <Aside type="tip">
 Use `router.replace()` em redirects para evitar que o usuário volte para a página de redirect.
