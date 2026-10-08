@@ -30,15 +30,15 @@ function h(
   tag: string | Function,
   props?: Props | null,
   ...children: Child[]
-): VNode
+): Node
 ```
 
 **Parâmetros:**
 - `tag`: Nome da tag HTML ou componente funcional
 - `props`: Propriedades do elemento (opcional)
-- `children`: Filhos do elemento (podem ser strings, números, VNodes, arrays)
+- `children`: Filhos do elemento (strings, números, `Node`s, arrays, reativos)
 
-**Retorna:** `VNode` - Representação virtual do elemento
+**Retorna:** `Node` - o elemento DOM real (o Slash não tem VNodes)
 
 **Exemplo:**
 ```typescript
@@ -54,7 +54,7 @@ const element = h('div', { class: 'container' },
 
 ### `html`
 
-Template tag que converte template strings em VNodes usando HTM.
+Template tag (HTM) que converte template strings em nós DOM. Seu tipo de retorno é `Child`; na prática, um `Node` (ou array de nós).
 
 ```typescript
 const html: HTMTemplate
@@ -95,18 +95,20 @@ const element = html`
 
 ### `render()`
 
-Monta um VNode no DOM.
+Monta uma view no DOM. Se o container já tiver HTML do servidor e a página tiver o script `__SLASH_STATE__`, hidrata (veja [Hydration](/avancado/hydration/)).
 
 ```typescript
 function render(
-  vnode: VNode,
-  container: HTMLElement
-): void
+  view: Child | (() => Child),
+  container: Element | string | null | undefined
+): Node | Node[]
 ```
 
 **Parâmetros:**
-- `vnode`: VNode para renderizar
-- `container`: Elemento DOM onde montar
+- `view`: o que renderizar (um `Child`, ou uma função que o retorna)
+- `container`: elemento DOM ou seletor CSS (`'#app'`). Lança erro se o seletor não encontrar elemento
+
+**Retorna:** o `Node` (ou `Node[]`) montado.
 
 **Exemplo:**
 ```typescript
@@ -626,56 +628,58 @@ router.currentRoute()              // RouteMatch | null
 
 ### `ErrorBoundary`
 
-Componente para capturar erros em componentes filhos.
+Componente com `fallback` para erros. **Limitação importante:** o `html` avalia os filhos de forma eager, antes de chamar o componente. Um erro lançado ao *construir* os filhos (por exemplo `<${Quebrado} />` dentro do boundary) acontece antes do `ErrorBoundary` rodar e **não é capturado por ele**. Para proteger uma subárvore, use [`safeRender`](#saferender), que recebe uma função e chama o `fallback` se ela lançar.
 
 ```typescript
-function ErrorBoundary(props: ErrorBoundaryProps): VNode
+function ErrorBoundary(props: ErrorBoundaryProps): Child
 
-interface ErrorBoundaryProps {
-  fallback?: (error: Error) => VNode
-  onError?: (error: Error) => void
-  children: VNode | VNode[]
+type ErrorBoundaryProps = {
+  fallback: (error: Error) => Child // obrigatório
+  onError?: (error: Error, errorInfo: { componentStack?: string }) => void
+  children: Child
 }
 ```
 
-**Exemplo:**
+**Exemplo (proteja a subárvore com `safeRender`):**
 ```typescript
-import { ErrorBoundary, html } from '@_bashell/slash'
+import { html, safeRender } from '@_bashell/slash'
 
-const App = html`
-  ${ErrorBoundary({
-    fallback: (error) => html`
-      <div class="error">
-        <h2>Something went wrong</h2>
-        <p>${error.message}</p>
-      </div>
-    `,
-    onError: (error) => {
-      console.error('Error caught:', error)
-    },
-    children: html`<${MyComponent} />`
-  })}
-`
+function Quebrado(): never {
+  throw new Error('boom')
+}
+
+const view = safeRender(
+  () => html`<main><${Quebrado} /></main>`,
+  (error) => html`
+    <div class="error">
+      <h2>Something went wrong</h2>
+      <p>${error.message}</p>
+    </div>
+  `
+)
 ```
 
 ---
 
 ### `catchAsync()`
 
-Wrapper para funções assíncronas que captura erros.
+Envolve uma função assíncrona e devolve uma **tupla** `[safeFn, getError]`.
 
 ```typescript
 function catchAsync<T>(
   fn: () => Promise<T>,
   onError?: (error: Error) => void
-): Promise<T | null>
+): [() => Promise<T | null>, () => Error | null]
 ```
+
+- `safeFn()` executa `fn`; se lançar, guarda o erro, chama `onError` e resolve com `null`.
+- `getError()` devolve o último erro (ou `null`; é limpo no início de cada `safeFn()`).
 
 **Exemplo:**
 ```typescript
 import { catchAsync } from '@_bashell/slash'
 
-const data = await catchAsync(
+const [loadData, getError] = catchAsync(
   async () => {
     const res = await fetch('/api/data')
     return res.json()
@@ -684,30 +688,39 @@ const data = await catchAsync(
     console.error('Fetch failed:', error)
   }
 )
+
+const data = await loadData() // dados, ou null se falhou
+if (data === null) {
+  console.log('Erro:', getError()?.message)
+}
 ```
 
 ---
 
 ### `safeRender()`
 
-Renderiza um VNode com tratamento de erro.
+Executa uma função de view e, se ela lançar, registra o erro no console e devolve o `fallback`.
 
 ```typescript
 function safeRender(
-  vnode: VNode,
-  onError?: (error: Error) => VNode
-): string
+  view: () => Child,
+  fallback: (error: Error) => Child // obrigatório
+): Child
 ```
 
-**Uso (SSR):**
+**Exemplo:**
 ```typescript
-import { safeRender } from '@_bashell/slash'
+import { html, safeRender } from '@_bashell/slash'
 
-const html = safeRender(
-  App,
+const App = () => html`<h1>Hello</h1>`
+
+const view = safeRender(
+  () => App(),
   (error) => html`<h1>Error: ${error.message}</h1>`
 )
 ```
+
+No SSR, use `htmlString` (de `@_bashell/slash/ssr`) em vez de `html` na `view` e no `fallback`.
 
 ---
 
@@ -717,7 +730,7 @@ Configura um handler global de erros.
 
 ```typescript
 function setupGlobalErrorHandler(
-  handler: (error: Error) => void
+  onError: (error: Error, source: 'render' | 'runtime') => void
 ): void
 ```
 
@@ -735,21 +748,39 @@ setupGlobalErrorHandler((error) => {
 
 ## Formulários
 
-### Form Helpers
+### Helpers de formulário
 
+Importados de `@_bashell/slash` (ou de `@_bashell/slash/forms`). Não existe um tipo `FormHelpers<T>`: o Slash oferece funções pequenas que ligam inputs a um `State`.
+
+| Função | Para que serve |
+|--------|----------------|
+| `textFieldControl(state)` | Props `value`/`onInput` para `<input>` e `<textarea>`, ligados a `State<{ value: string }>` |
+| `checkboxControl(state)` | Props `checked`/`onChange` para checkbox, com `State<{ value: boolean }>` |
+| `radioControl(state, value)` | Props para um radio do grupo, com `State<{ value: string }>` |
+| `SelectControl(state)` | Props para `<select>`, com `State<{ value: string }>` |
+| `getText(e)`, `getChecked(e)`, `getSelectValue(e)` | Leem o valor de eventos tipados |
+| `onSubmit(cb)` | `preventDefault()` e entrega os dados do `<form>` como objeto |
+| `onReset(handler)`, `onButtonClick(handler)` | Handlers tipados |
+| `formToObject(form)` | Converte um `<form>` em objeto (campos repetidos viram arrays) |
+| `delegate(root, type, selector, handler)` | Delegação de eventos; retorna função para remover o listener |
+
+**Exemplo:**
 ```typescript
-interface FormHelpers<T> {
-  values: State<T>
-  errors: State<Partial<Record<keyof T, string>>>
-  touched: State<Partial<Record<keyof T, boolean>>>
-  handleSubmit: (e: Event) => void
-  handleChange: (field: keyof T, value: any) => void
-  handleBlur: (field: keyof T) => void
-  reset: () => void
-}
+import { html, render, onSubmit } from '@_bashell/slash'
+
+const log = (data: Record<string, unknown>) => console.log(data)
+
+const Form = () => html`
+  <form onSubmit=${onSubmit(log)}>
+    <input name="email" type="email" />
+    <button type="submit">Enviar</button>
+  </form>
+`
+
+render(Form(), '#app')
 ```
 
-**Exemplo de uso está na seção de [Form Validation](/exemplos/form-validation/)**
+Veja os conceitos, o comportamento de foco e os exemplos completos em [Formulários](/formularios/conceitos/) e [Form Validation](/exemplos/form-validation/).
 
 ---
 
@@ -804,27 +835,13 @@ function isWarningsEnabled(): boolean
 
 ## Tipos TypeScript
 
-### `VNode`
-
-Representação virtual de um nó DOM.
-
-```typescript
-type VNode = ElementNode | TextNode | ComponentNode
-```
-
 ### `Props`
 
-Propriedades de um elemento.
+Propriedades de um elemento (`Record<string, unknown> | null`). Handlers de evento usam camelCase (`onClick`, `onInput`).
 
 ```typescript
-interface Props {
-  [key: string]: any
-  class?: string
-  style?: string | Record<string, string>
-  onclick?: EventHandler
-  onchange?: EventHandler
-  // ... outros event handlers
-}
+type Props = Record<string, unknown> | null
+type EventHandler = EventListenerOrEventListenerObject
 ```
 
 ### `State<T>`
@@ -832,10 +849,14 @@ interface Props {
 Tipo retornado por `createState()`.
 
 ```typescript
-interface State<T> {
-  get(): T
-  set(value: T): void
-  watch(callback: (newValue: T, oldValue: T) => void): () => void
+type State<T> = {
+  get: () => T
+  set: (value: T) => void
+  // O callback recebe só o novo valor; retorna a função de cancelamento
+  watch: (callback: (value: T) => void) => () => void
+  // Presentes quando o state foi criado com { enableHistory: true }
+  getHistory?: () => Readonly<StateHistory<T>>
+  clearHistory?: () => void
 }
 ```
 
@@ -845,13 +866,15 @@ Tipos válidos para children de elementos.
 
 ```typescript
 type Child =
-  | VNode
+  | Node
   | string
   | number
   | boolean
   | null
   | undefined
+  | Reactive<unknown> // { get(), subscribe(fn) }
   | Child[]
+  | readonly Child[]
 ```
 
 ---
@@ -860,4 +883,4 @@ type Child =
 
 - [Exemplos Práticos](/exemplos/todo-app/) - Aplicações completas
 - [Guias Avançados](/avancado/ssr/) - Técnicas avançadas
-- [Comparações](/referencia/comparacoes/) - Slash vs outras libs
+- [Slash vs React](/referencia/slash-vs-react/) - Comparação com outras libs
