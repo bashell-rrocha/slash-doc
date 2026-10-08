@@ -393,7 +393,7 @@ String(page)
 // <h1>My Page &lt;script&gt;</h1>
 ```
 
-Use `String(page)` (ou `renderToString(() => page).html`) quando precisar de uma `string`. Strings dinâmicas dentro de `<script>`/`<style>` também são escapadas; para JSON use `unsafeHtml(serializeStateForScript(dados))`. Um `<` literal dentro de um `<script>` estático do template é lido como tag (limitação do htm): coloque esse código em `unsafeHtml(...)`.
+Use `String(page)` (ou `renderToString(() => page).html`) quando precisar de uma `string`. Valores dinâmicos dentro de `<script>`/`<style>` são descartados (com aviso em dev); para JSON use `unsafeHtml(serializeStateForScript(dados))`. Um `<` literal dentro de um `<script>` estático do template é lido como tag (limitação do htm): coloque esse código em `unsafeHtml(...)`.
 
 ---
 
@@ -456,6 +456,27 @@ function isSafeUrl(x: unknown): x is SafeUrl
 `SafeUrl` é o tipo devolvido por `unsafeUrl`. Assim como no `SafeHtml`, a marca não é forjável por JSON e se perde ao serializar estado para hidratação (a URL volta a ser sanitizada).
 
 Veja a política completa de URLs em [Segurança](/fundamentos/seguranca/).
+
+---
+
+### `sanitizeUrl()` e `BLOCKED_URL`
+
+```typescript
+function sanitizeUrl(attr: string, value: string, tag?: string): string
+const BLOCKED_URL: 'about:blank#blocked'
+```
+
+Aplica a política de URLs do Slash a um valor e devolve o próprio valor ou `BLOCKED_URL`. Exportados por `@_bashell/slash/core` e `@_bashell/slash/ssr`. `attr` é o nome do atributo (`'href'`, `'src'`...) e `tag` (opcional, por exemplo `'img'`) importa porque `blob:` e `data:image/svg+xml` só passam em contextos de imagem e mídia. Em dev, um valor bloqueado emite o mesmo aviso dos templates.
+
+```typescript
+import { sanitizeUrl, BLOCKED_URL } from '@_bashell/slash/core'
+
+const destino = sanitizeUrl('href', req.query.next ?? '/')
+if (destino === BLOCKED_URL) return res.redirect('/')
+res.redirect(destino)
+```
+
+A política é de **esquema**: ela não restringe o host. `https://qualquer.com` passa.
 
 ---
 
@@ -669,12 +690,14 @@ html`<${Link} to="/about" router=${router} class="nav-link">About<//>`
 
 **Props:** `to: string`, `router: RouterInstance` (obrigatório), `external?: boolean` e `children`.
 
-`to` precisa ser um caminho do app (`/x`, `?q` ou `#h`). Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) não navega: o clique recebe `preventDefault` e o `href` vira `about:blank#blocked`. Para um site externo, use `external`: só libera `http(s)`, `mailto:` e `tel:` e adiciona `rel="noopener noreferrer"`.
+`to` precisa ser um caminho do app (`/x`, `?q` ou `#h`). Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) não navega: o clique recebe `preventDefault` e o `href` vira `about:blank#blocked`. Para um site externo, use `external`: só libera `http(s)`, `mailto:`, `sms:` e `tel:` e adiciona `rel="noopener noreferrer"`.
 
 ```typescript
 html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
 // <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
 ```
+
+`?q` e `#h` são relativos à página atual. O roteador só intercepta cliques em links `http(s)` da mesma origem (respeitando `<base>`); com ctrl, meta, shift ou alt, botão que não seja o esquerdo, `target` diferente de `_self` ou `download`, o navegador age normalmente. Se o navegador recusar um `router.push()`/`replace()`, a promise rejeita com `Navigation failed: ...` e o estado do roteador continua igual à URL.
 
 ---
 

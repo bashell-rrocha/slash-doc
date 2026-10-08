@@ -60,17 +60,24 @@ A 0.0.3 torna o core **seguro por padrão**. Uma string é sempre texto, URLs e 
 | devolve HTML montado à mão de um componente ou helper (`return "<div>...</div>"`, Markdown, ícones) | a string aparece como texto visível | devolva um template `htmlString`/`html`; para marcação confiável use `unsafeHtml(str)` |
 | usa o helper `text()` ou o espaço inicial para escapar strings que começam com `<` | não é mais necessário, toda string já é escapada | apague o helper e interpole direto |
 | passa `innerHTML=${...}`, `outerHTML=...` ou `srcdoc=${...}` como prop | a prop é ignorada (aviso em dev) | use `unsafeHtml(...)` como filho; `srcdoc=${unsafeHtml(...)}` |
-| usa `javascript:`, `data:text/html`, `blob:` ou esquemas próprios em `href`/`src`/`action` | o valor vira `about:blank#blocked` | use uma URL real, ou `unsafeUrl(url)` para uma URL confiável |
+| usa `javascript:`, `data:text/html`, `file:`, `whatsapp:`, `ftp:` ou outros esquemas próprios em `href`/`src`/`action` (passam `http`, `https`, `mailto`, `tel`, `sms`; `blob:` em `src` de mídia; `data:image/svg+xml` em `img` e `url()` de CSS) | o valor vira `about:blank#blocked` | use uma URL real, ou `unsafeUrl(url)` para uma URL confiável; valide entradas com `sanitizeUrl` |
 | usa `<${Link} to="./x">`, `to="../x"`, `to="about"` ou uma URL absoluta | não navega, `href` bloqueado | use um caminho do app (`/x`, `?q`, `#h`); para site externo, adicione `external` |
 | usa handlers em string (`onclick="..."`) ou um atributo comum que comece com `on` | toda prop `on*` que não seja função, objeto handler ou `[fn, opções]` é descartada (cliente e SSR) | passe uma função: `onClick=${fn}`; use `data-` nos atributos comuns |
-| escreve `<script>${json}</script>` ou `<style>${css}</style>` com valores dinâmicos no `htmlString` | strings dinâmicas são escapadas (aviso em dev) | `unsafeHtml(serializeStateForScript(dados))` para JSON; mantenha CSS/JS estáticos |
+| escreve `<script>${json}</script>` ou `<style>${css}</style>` com valores dinâmicos (`html` ou `htmlString`) | strings, números, arrays, componentes e reativos dinâmicos são descartados, no cliente e no SSR (aviso em dev) | `unsafeHtml(serializeStateForScript(dados))` para JSON; mantenha CSS/JS estáticos |
 | coloca um `<` literal num `<script>` estático dentro do `htmlString` (`if (a < b)`) | o htm lê como tag | mova esse código para `unsafeHtml(...)` |
+| usa `<script id="__SLASH_STATE__">` sem `type` | o `render()` ignora o script (aviso em dev) | adicione `type="application/json"` |
+| passa props com nome de método do DOM (`click`, `focus`) ou `constructor` | a prop de método vira atributo e `constructor` é bloqueada | use `onClick=${fn}` para eventos |
+| tem estado circular ou aninhado em mais de 1000 níveis | `createState` lança `State is circular or nested deeper than 1000 levels` | achate o estado ou guarde ids em vez de referências |
+| compara mensagens de runtime em português (`URL bloqueada`...) em testes | as mensagens agora são em inglês | atualize o texto esperado |
+| depende de o roteador interceptar links `mailto:`, `tel:` ou de outra origem, ou de `?q`/`#h` relativos à rota | só links `http(s)` da mesma origem são interceptados; `?q` e `#h` são relativos à página atual | links normais não mudam; use `external` para outros sites |
 | interpola um `State` direto no SSR (`${state}`) | um `State` não é reativo no servidor | interpole `state.get()` |
 | embute estado com `JSON.stringify(state)` num `<script>` | quebra com `</script>` | `serializeStateForScript(state)` |
 | chama `__addBatchEndCallback`, `__removeBatchEndCallback` ou `__recordBatchUpdate` | removidos | use `batch()` e `state.watch()` |
 | monta um `RouterInstance` à mão (mock) | `ready` é obrigatório | adicione `ready: Promise.resolve()` |
 | chama `data.hasOwnProperty(...)` em `formToObject()` ou `router.query` | esses objetos não têm protótipo | `Object.hasOwn(data, "campo")` |
 | usava strings `style="..."` no cliente aplicadas como vieram | declarações inseguras são descartadas | use só valores CSS simples: sem comentários `/* */`, escapes só dentro de aspas, `url("a b.png")` com aspas se houver caracteres especiais, no máximo 8 KB |
+
+Quanto aos builds: Vite (dev) e webpack (`mode: "development"`) usam sozinhos o build de desenvolvimento, que mostra um aviso para cada bloqueio. O build de produção não traz esses avisos, mas mantém `console.error` para erros reais. Para ver os avisos fora de um bundler, rode com `--conditions=development`.
 
 Buscas rápidas para achar os casos no seu projeto:
 

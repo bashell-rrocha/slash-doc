@@ -417,7 +417,7 @@ bun run build
 
 ### Bundle Size
 
-O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **5,12 KB gzip** e 4,48 KB brotli. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
+O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **8,39 KB gzip** e 7,45 KB brotli. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
 
 ## Configuração Recomendada
 

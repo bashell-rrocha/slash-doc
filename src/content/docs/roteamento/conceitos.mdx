@@ -181,7 +181,7 @@ html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
 // <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
 ```
 
-`external` só libera `http(s)`, `mailto:` e `tel:` e adiciona `rel="noopener noreferrer"`. Veja [Segurança](/fundamentos/seguranca/).
+`external` só libera `http(s)`, `mailto:`, `tel:` e `sms:` e adiciona `rel="noopener noreferrer"`. `?q` e `#h` são relativos à página atual. O roteador só intercepta cliques em links `http(s)` da mesma origem (respeitando `<base>`); com ctrl, meta, shift ou alt, botão que não seja o esquerdo, `target` diferente de `_self` ou `download`, o navegador age normalmente. Barras invertidas em `router.push()` viram o caminho da mesma origem (`'/\\evil'` vai para `/evil`), e um `push` recusado pelo navegador rejeita com `Navigation failed: ...` sem dessincronizar o roteador. Veja [Segurança](/fundamentos/seguranca/).
 
 ## Parâmetros dinâmicos
 

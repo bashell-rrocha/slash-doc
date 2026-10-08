@@ -14,6 +14,8 @@ Esta página descreve o que a versão atual do Slash faz de fato na hidratação
 3. No cliente, `render(view, container)` percebe que o container **já tem conteúdo** e que existe o script `__SLASH_STATE__`.
 4. Nesse caso `render()` lê o JSON do script, **remove o script**, **limpa o container** e renderiza a view do zero no cliente.
 
+O atributo `type="application/json"` é **obrigatório**: o `render()` só reconhece `script#__SLASH_STATE__[type="application/json"]`. Com um script sem `type`, ele avisa em dev e renderiza do zero.
+
 Não há uma função `hydrate()` separada: o mesmo `render()` serve para os dois casos.
 
 ```typescript

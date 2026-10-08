@@ -259,7 +259,7 @@ function TodoList() {
 
 Esta página não traz tabelas de benchmark nem comparação de tamanho com o SolidJS: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **8,00 KB gzip** e 7,10 KB brotli. O número depende do que seu app importa.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **8,39 KB gzip** e 7,45 KB brotli. O número depende do que seu app importa.
 
 ---
 
@@ -460,7 +460,7 @@ response.send(fullHtml)
    - Quer entender tudo que acontece
 
 3. **Bundle Size Pequeno**
-   - Um app mínimo mede 8,00 KB gzip
+   - Um app mínimo mede 8,39 KB gzip
    - Poucas dependências
    - Embedded apps
 
@@ -625,7 +625,7 @@ No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
 - Valoriza simplicidade extrema
 - Prefere explicitness > magic
 - Não quer build step
-- Quer uma biblioteca pequena (app mínimo: 8,00 KB gzip)
+- Quer uma biblioteca pequena (app mínimo: 8,39 KB gzip)
 - Quer controle total
 - Aprecia APIs minimalistas
 
