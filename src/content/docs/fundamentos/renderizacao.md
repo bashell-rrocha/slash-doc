@@ -200,6 +200,8 @@ const styles = { color: 'red', fontSize: '16px' }
 const el2 = html`<div style=${styles}></div>`
 ```
 
+Cada declaração passa por uma política de CSS: declarações inseguras (`url(javascript:...)`, `expression(...)`, barra invertida fora de aspas) são descartadas e as demais são mantidas. Um `style` que fica vazio é omitido. Veja [Segurança](/fundamentos/seguranca/).
+
 ### Children (Filhos)
 
 Children podem ser:
@@ -228,6 +230,26 @@ const Page = () => html`
   </div>
 `
 ```
+
+#### Strings são sempre texto
+
+Uma string nunca vira HTML, seja qual for o conteúdo. Isso protege contra XSS e vale para qualquer valor, inclusive os que vêm do usuário:
+
+```typescript
+const comentario = '<img src=x onerror="alert(1)">'
+
+html`<p>${comentario}</p>` // mostra o texto literal; nada executa
+```
+
+Para inserir marcação confiável que você mesmo gerou, use `unsafeHtml(...)` como filho. Ele **não sanitiza**: nunca passe dado de usuário por ele.
+
+```typescript
+import { html, unsafeHtml } from '@_bashell/slash/core'
+
+html`<button>${unsafeHtml('<svg viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>')} Salvar</button>`
+```
+
+Veja a página [Segurança](/fundamentos/seguranca/) para as regras de URLs, eventos e estilos.
 
 **Implementação:** [src/rendering/children.ts](../../src/rendering/children.ts:1)
 

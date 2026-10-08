@@ -174,6 +174,15 @@ function Navigation({ router }) {
 O componente `Link` previne o comportamento padrão do navegador e usa `router.push()` internamente, evitando reloads desnecessários.
 </Aside>
 
+`Link` aceita **somente caminhos do app**: `/x`, `?q` ou `#h`. Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) nunca navega: o `href` vira `about:blank#blocked` e o dev mode avisa. Para um link externo de verdade, use a prop `external`:
+
+```typescript
+html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
+// <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
+```
+
+`external` só libera `http(s)`, `mailto:` e `tel:` e adiciona `rel="noopener noreferrer"`. Veja [Segurança](/fundamentos/seguranca/).
+
 ## Parâmetros dinâmicos
 
 Rotas podem ter segmentos dinâmicos que extraem valores da URL:
@@ -250,7 +259,7 @@ const router = createRouter({
 ```
 
 <Aside type="tip">
-Query params são sempre strings. Converta para números se necessário: `const page = parseInt(state.query.page || '1', 10)`
+Query params são sempre strings. Converta para números se necessário: `const page = parseInt(state.query.page || '1', 10)`. O objeto `query` não tem protótipo (`Object.create(null)`): para testar uma chave use `'q' in state.query` ou `Object.hasOwn(state.query, 'q')`, não `state.query.hasOwnProperty('q')`.
 </Aside>
 
 ## Navegação programática
@@ -482,7 +491,7 @@ const { html } = renderToString(
 ```
 
 <Aside type="caution">
-No SSR, uma string que começa com `<` (filho comum ou retornada por um reativo, inclusive `${state.get()}`) é tratada como HTML já renderizado e emitida sem escape. Não devolva de uma rota ou componente texto de usuário que comece com `<` sem escapá-lo. A saída de `htmlString` é segura.
+No SSR, toda string é escapada. Os componentes das rotas devem devolver `htmlString` (ou `unsafeHtml(...)` para marcação confiável): uma string comum devolvida por uma rota aparece como texto. Veja [Segurança](/fundamentos/seguranca/).
 </Aside>
 
 Veja [SSR](/avancado/ssr/) para o fluxo completo de renderização e hidratação.

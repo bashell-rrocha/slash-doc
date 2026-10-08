@@ -42,16 +42,21 @@ Em dev mode, Slash emite warnings úteis no console quando detecta problemas:
 
 ### Tipos de Warnings
 
-**1. Props inválidas:**
+**1. Props e valores bloqueados pela política de segurança:**
 ```typescript
 import { html } from '@_bashell/slash'
 
-// ⚠️ Warning: Unknown prop "onclick" (should be "onClick")
-html`<button onclick=${() => {}}>Click</button>`
+// ⚠️ onclick só aceita função, objeto handleEvent ou tupla [fn, opções]; ...
+html`<button onclick="alert(1)">Click</button>`
+
+// ⚠️ URL bloqueada em href: "javascript:alert(1)". Para URL confiável use unsafeUrl()
+html`<a href=${'javascript:alert(1)'}>Open</a>`
 
 // ✅ Correto
 html`<button onClick=${() => {}}>Click</button>`
 ```
+
+Cada bloqueio de segurança (`innerHTML`, `srcdoc`, URLs, `style`, handlers que não são função, `Link` com caminho inválido) emite um aviso por tipo, com a correção sugerida. Veja [Segurança](/fundamentos/seguranca/).
 
 **2. State mutations:**
 ```typescript

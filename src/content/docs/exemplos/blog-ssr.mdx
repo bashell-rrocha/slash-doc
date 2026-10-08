@@ -36,7 +36,7 @@ src/
 │   ├── PostListPage.ts    # Lista com states (cliente)
 │   └── Comments.ts        # Comentários com states (cliente)
 ├── shared/
-│   ├── view.ts            # html no cliente, htmlString no servidor, helper text()
+│   ├── view.ts            # html no cliente, htmlString no servidor
 │   ├── api.ts             # URL base da API (absoluta no servidor)
 │   ├── components/
 │   │   ├── Layout.ts      # Layout base
@@ -87,7 +87,7 @@ export interface PostListResponse {
 
 ## Template compartilhado: `view`
 
-O mesmo componente roda no servidor (gera string) e no cliente (gera DOM). Um módulo escolhe o template certo:
+O mesmo componente roda no servidor (gera `SafeHtml`) e no cliente (gera DOM). Um módulo escolhe o template certo:
 
 ```typescript title="src/shared/view.ts"
 import { html } from '@_bashell/slash/core'
@@ -96,11 +96,8 @@ import { htmlString } from '@_bashell/slash/ssr'
 // No servidor htmlString gera HTML; no navegador html gera nós DOM
 export const view = (typeof document === 'undefined' ? htmlString : html) as typeof html
 
-// Texto de usuário (título, resumo, tags, nome do autor, conteúdo) deve passar por text().
-// No SSR, uma string que começa com `<` é tratada como HTML pronto e NÃO é escapada;
-// o espaço inicial impede isso, e o htmlString passa a escapar o valor normalmente.
-// No cliente o `html` já cria nós de texto, então o espaço é inofensivo.
-export const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
+// Strings são sempre escapadas, nos dois lados: título, resumo, tags, nome do autor
+// e conteúdo podem ser interpolados direto, sem helper.
 ```
 
 <Aside type="note">
@@ -207,7 +204,7 @@ export const Layout = ({ children }: LayoutProps) => view`
 A view é pura (recebe dados por props), então serve ao servidor e ao cliente. A versão do cliente guarda a página e os dados em states **fora** do componente e os lê dentro do componente:
 
 ```typescript title="src/shared/components/PostList.ts"
-import { view, text } from '../view'
+import { view } from '../view'
 import type { PostListResponse } from '../types'
 
 const formatDate = (date: string): string =>
@@ -227,15 +224,15 @@ export const PostListView = ({ data, onPrev, onNext }: PostListViewProps) => vie
     <div class="posts">
       ${data.posts.map((post) => view`
         <article class="post-card">
-          <h2><a href=${`/posts/${post.slug}`}>${text(post.title)}</a></h2>
+          <h2><a href=${`/posts/${post.slug}`}>${post.title}</a></h2>
           <div class="post-meta">
-            <span class="author-name">${text(post.author.name)}</span>
+            <span class="author-name">${post.author.name}</span>
             <time datetime=${post.publishedAt}>${formatDate(post.publishedAt)}</time>
             <span>${post.readTime} min read</span>
           </div>
-          <p class="post-excerpt">${text(post.excerpt)}</p>
+          <p class="post-excerpt">${post.excerpt}</p>
           <div class="post-tags">
-            ${post.tags.map((tag) => view`<span class="tag">${text(tag)}</span>`)}
+            ${post.tags.map((tag) => view`<span class="tag">${tag}</span>`)}
           </div>
         </article>
       `)}
@@ -383,7 +380,7 @@ export const Comments = ({ postId }: { postId: string }) => html`
 Visualização de um post, também como view pura:
 
 ```typescript title="src/shared/components/PostDetail.ts"
-import { view, text } from '../view'
+import { view } from '../view'
 import type { Post } from '../types'
 
 const formatDate = (date: string): string =>
@@ -393,19 +390,19 @@ const formatDate = (date: string): string =>
 export const PostDetail = ({ post, comments }: { post: Post; comments?: unknown }) => view`
   <article class="post-detail">
     <header class="post-header">
-      <h1>${text(post.title)}</h1>
+      <h1>${post.title}</h1>
       <div class="post-meta">
-        <span class="author-name">${text(post.author.name)}</span>
+        <span class="author-name">${post.author.name}</span>
         <time datetime=${post.publishedAt}>${formatDate(post.publishedAt)}</time>
         <span>${post.readTime} min read</span>
       </div>
       <div class="post-tags">
-        ${post.tags.map((tag) => view`<span class="tag">${text(tag)}</span>`)}
+        ${post.tags.map((tag) => view`<span class="tag">${tag}</span>`)}
       </div>
     </header>
 
     <div class="post-content">
-      <p>${text(post.content)}</p>
+      <p>${post.content}</p>
     </div>
 
     <footer class="post-footer">
@@ -418,7 +415,7 @@ export const PostDetail = ({ post, comments }: { post: Post; comments?: unknown 
 ```
 
 <Aside type="caution">
-**Todo campo vindo de usuário é texto não confiável**: `title`, `excerpt`, `tags`, `author.name` e `content`, não só o conteúdo. No SSR, uma string que **começa com `<`** é tratada como HTML pronto e emitida sem escape, em qualquer interpolação. Por isso estes campos passam por `text()` (veja `view.ts`). Se o conteúdo for markdown ou HTML de verdade, converta e **sanitize** antes de inseri-lo como HTML; nunca o interpole cru.
+**Todo campo vindo de usuário é texto não confiável**: `title`, `excerpt`, `tags`, `author.name` e `content`, não só o conteúdo. O Slash escapa toda string, no servidor e no cliente, então basta interpolá-las. Se o conteúdo for markdown ou HTML de verdade, converta, **sanitize** com uma biblioteca de sanitização e só então embrulhe o resultado com `unsafeHtml(...)`; o `unsafeHtml` não sanitiza nada. Veja [Segurança](/fundamentos/seguranca/).
 </Aside>
 
 ## Servidor HTTP
@@ -512,7 +509,7 @@ server.listen(PORT, () => {
 ```
 
 <Aside type="caution">
-O documento é montado com um template literal comum. O `markup` (já renderizado pelo Slash, onde os campos de usuário passaram por `text()`) entra como está. O `title` vem de dado de usuário e é escapado à mão com `escapeHtml`. Os dados dos loaders vão para o script JSON apenas por `serializeStateForScript`, que escapa `<`, `>` e `&`; nunca use `JSON.stringify` cru nem interpole o JSON por `htmlString`, que o escaparia como texto e quebraria o `JSON.parse` do cliente.
+O documento é montado com um template literal comum. O `markup` (já renderizado pelo Slash, que escapou os campos de usuário) entra como está. O `title` vem de dado de usuário e é escapado à mão com `escapeHtml`. Os dados dos loaders vão para o script JSON apenas por `serializeStateForScript`, que escapa `<`, `>` e `&`; nunca use `JSON.stringify` cru nem interpole o JSON por `htmlString`, que o escaparia como texto e quebraria o `JSON.parse` do cliente.
 </Aside>
 
 ## Cliente (Hidratação)
@@ -677,7 +674,7 @@ invalidateLoader()
 2. **Hidratação**: o cliente limpa o HTML do servidor e renderiza de novo com os mesmos dados (o HTML do servidor não é reaproveitado)
 3. **Loaders Isomórficos**: Mesmo código funciona em servidor e cliente
 4. **Cache Compartilhado**: `hydrateLoaderCache` evita fetches desnecessários no cliente
-5. **Segurança**: dado de usuário passa por `text()` ou `escapeHtml`; o JSON da página sai de `serializeStateForScript`
+5. **Segurança**: o Slash escapa toda string dos componentes e o shell usa `escapeHtml`; o JSON da página sai de `serializeStateForScript`
 
 ## Próximos Passos
 

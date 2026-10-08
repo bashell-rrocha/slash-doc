@@ -5,6 +5,8 @@ description: Renderização no servidor com Slash para melhor performance e SEO
 
 O Slash oferece suporte completo a **Server-Side Rendering (SSR)**, permitindo renderizar suas aplicações no servidor para melhorar a performance inicial, SEO e experiência do usuário.
 
+> O Slash é seguro por padrão: toda string é escapada. Leia [Segurança](/fundamentos/seguranca/) antes de colocar dado de usuário numa página.
+
 ## O que é SSR?
 
 SSR (Server-Side Rendering) é o processo de renderizar sua aplicação no servidor, gerando HTML completo que é enviado ao navegador. Isso oferece vários benefícios:
@@ -94,13 +96,13 @@ Note os **marcadores de reatividade** (`<!--reactive-start:s0-->` e `<!--reactiv
 
 ## `htmlString` - Template Tag para SSR
 
-O `htmlString` é uma versão especial do template tag `html` otimizada para SSR. Ele renderiza diretamente para strings HTML.
+O `htmlString` é uma versão especial do template tag `html` otimizada para SSR. Ele renderiza diretamente para HTML e devolve um `SafeHtml`: um valor que o Slash reconhece como marcação já segura (converta com `String(valor)` se precisar de uma `string`).
 
 ### Diferença entre `html` e `htmlString`
 
 | `html` (Cliente)           | `htmlString` (Servidor)      |
 |----------------------------|------------------------------|
-| Retorna `Node` (DOM)       | Retorna `string` (HTML)      |
+| Retorna `Node` (DOM)       | Retorna `SafeHtml`           |
 | Usa no navegador           | Usa no servidor              |
 | Cria elementos reais       | Cria strings HTML            |
 
@@ -118,17 +120,14 @@ const App = () => htmlString`<div>Funciona no servidor</div>`
 
 ### Escapando HTML
 
-O `htmlString` escapa valores de texto interpolados, **desde que o texto não comece com `<`** (nesse caso é tratado como HTML pronto, veja a regra de confiança abaixo). Para dado de usuário que possa começar com `<`, prefixe um espaço antes de interpolar (o helper `text()` do exemplo abaixo faz isso):
+O `htmlString` escapa **toda** string interpolada, sempre. Uma string é dado, nunca HTML, e isso vale para strings devolvidas por componentes e por `${state.get()}`. Não existe helper nem truque: interpole direto.
 
 ```typescript
-// Espaço inicial se o texto começar com `<`: o htmlString passa a escapá-lo
-const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
-
 const userInput = "João <script>alert()</script>"
 
 const App = () => htmlString`
   <div>
-    <p>${text(userInput)}</p>
+    <p>${userInput}</p>
   </div>
 `
 
@@ -138,20 +137,30 @@ const { html } = renderToString(App)
 // </div>
 ```
 
-:::caution[Regra de confiança: string que começa com `<` é HTML pronto]
-No SSR, uma string (filho comum ou retornada por um reativo ou componente) que **começa com `<`** é tratada como HTML já renderizado e emitida **sem escape**. É assim que o resultado de um `htmlString` aninhado entra no pai, mas vale para qualquer string, **inclusive o resultado de `${state.get()}`**:
+O mesmo vale para um `State` que guarda texto de usuário:
 
 ```typescript
+import { createState } from '@_bashell/slash/core'
+
 const comment = createState('<img src=x onerror=alert(1)>') // dado de usuário
 
 htmlString`<p>${comment.get()}</p>`
-// <p><img src=x onerror=alert(1)></p>   <- NÃO foi escapado
+// <p>&lt;img src=x onerror=alert(1)&gt;</p>   <- escapado
 ```
 
-Nunca interpole dado de usuário que possa começar com `<` sem escapá-lo antes (a saída de `htmlString` é segura).
+Um template `htmlString` aninhado, um componente ou uma lista (`items.map(...)`) entram no pai sem escape duplo porque o resultado do `htmlString` é um `SafeHtml`, não uma string. Para marcação confiável que você mesmo gerou (um ícone SVG, por exemplo), use `unsafeHtml(...)`:
 
-Nuance: o que é lido como **primitivo** de `state.get()` (como acima, onde o state guarda uma string) sai cru se começar com `<`. Já uma string lida de uma **propriedade de objeto** (`user.get().bio`) é escapada e recebe marcadores `<!--reactive-start:id-->`, então não vira HTML. Não dependa dessa diferença: continue escapando dado de usuário antes de interpolar.
+```typescript
+import { htmlString, unsafeHtml } from '@_bashell/slash/ssr'
+
+htmlString`<button>${unsafeHtml('<svg viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>')} Salvar</button>`
+```
+
+:::caution[`unsafeHtml` não sanitiza]
+Ele significa "eu garanto este valor". Nunca passe dado de usuário por ele, nem "limpo" com regex. Veja a página [Segurança](/fundamentos/seguranca/).
 :::
+
+Atributos também são verificados: URLs perigosas (`javascript:`, `data:text/html`...) viram `about:blank#blocked`, e props `on*` que não são função são descartadas. Os detalhes estão em [Segurança](/fundamentos/seguranca/).
 
 ### Estado no SSR
 
@@ -197,7 +206,7 @@ const { html } = renderToString(
 // <main><!--reactive-start:s0--><h1>Home</h1><!--reactive-end:s0--></main>
 ```
 
-O HTML da rota é emitido de verdade (não escapado) e não vai para `state`. A regra de confiança acima vale também para os componentes das rotas.
+O HTML da rota é emitido de verdade e não vai para `state`. Os componentes das rotas devem devolver `htmlString` (ou `unsafeHtml(...)` para marcação confiável): uma string comum devolvida por uma rota é escapada como texto.
 
 ## `renderToStream()`
 
@@ -417,7 +426,9 @@ const Footer = () => htmlString`
   </footer>
 `
 
-const Layout = ({ children }: { children: string }) => htmlString`
+import type { SafeHtml } from '@_bashell/slash/ssr'
+
+const Layout = ({ children }: { children: SafeHtml }) => htmlString`
   <div class="layout">
     <${Header} title="Minha App" />
     <main>${children}</main>
@@ -595,7 +606,9 @@ app.listen(3000)
 - ✅ No cliente, `render()` substitui o HTML do servidor por uma renderização nova (veja [Hydration](/avancado/hydration))
 - ✅ Event handlers são ignorados no servidor (existem depois que o cliente renderiza)
 - ✅ Atributos reativos recebem marcadores `data-reactive-*`
-- ✅ Texto interpolado é escapado, **exceto** strings que começam com `<` (tratadas como HTML pronto, inclusive `${state.get()}`): escape dado de usuário antes
+- ✅ Toda string interpolada é escapada, sem exceção (inclusive `${state.get()}`); marcação confiável exige `unsafeHtml(...)`
+- ✅ Valores dinâmicos dentro de `<script>`/`<style>` precisam ser `SafeHtml`; para JSON use `unsafeHtml(serializeStateForScript(dados))`
+- ✅ O título e qualquer dado de usuário que você colocar no shell (template literal comum) precisam ser escapados por você (veja [Segurança](/fundamentos/seguranca/))
 
 ## Próximos Passos
 

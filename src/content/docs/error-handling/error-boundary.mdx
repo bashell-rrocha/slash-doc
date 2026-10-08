@@ -414,7 +414,7 @@ async function loadData() {
 
 ### 5. Use safeRender em SSR
 
-Veja o exemplo completo em [Uso em SSR](#uso-em-ssr): o documento é montado com template literal comum e o `fallback` devolve uma string HTML.
+Veja o exemplo completo em [Uso em SSR](#uso-em-ssr): o documento é montado com template literal comum, e o `fallback` devolve uma string HTML montada à mão, o que só funciona porque ela entra num template literal comum. Dentro de `html`/`htmlString`, uma string é sempre texto: devolva um template (ou `unsafeHtml(...)` para marcação confiável).
 
 ## Comparação com outros frameworks
 

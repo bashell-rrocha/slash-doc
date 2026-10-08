@@ -103,7 +103,7 @@ const page = `<!DOCTYPE html>
 ```
 
 <Aside type="caution">
-No SSR, uma string que começa com `<` é tratada como HTML pronto e emitida sem escape, inclusive o resultado de `${state.get()}`. Escape dado de usuário antes de interpolar. Veja [SSR](/avancado/ssr/).
+No SSR, toda string é escapada, inclusive o resultado de `${state.get()}`; marcação confiável exige `unsafeHtml(...)`. O JSON do estado vai sempre por `serializeStateForScript`. Um `SafeHtml` guardado em estado reativo perde a marca ao ser serializado e volta como texto. Veja [Segurança](/fundamentos/seguranca/) e [SSR](/avancado/ssr/).
 </Aside>
 
 ## Router na hidratação
