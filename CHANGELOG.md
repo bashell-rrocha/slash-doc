@@ -2,6 +2,10 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui, seguindo [Conventional Commits](https://www.conventionalcommits.org/) e [SemVer](https://semver.org/).
 
+## [0.0.5] — 2026-10-08
+
+- Deploy: o workflow cria o projeto `slash-docs` no Cloudflare Pages na primeira execução.
+
 ## [0.0.4] — 2026-10-08
 
 - Deploy automático no Cloudflare Pages pelo GitHub Actions a cada release na `main` (`.github/workflows/deploy.yml`); `bun.lock` próprio para instalação reprodutível.

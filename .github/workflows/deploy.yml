@@ -31,6 +31,18 @@ jobs:
       - name: Build
         run: bun run build
 
+      # Cria o projeto na primeira execução; se já existir, segue em frente.
+      - name: Garantir projeto no Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if bunx wrangler@3 pages project list | grep -q ' slash-docs '; then
+            echo "Projeto slash-docs já existe"
+          else
+            bunx wrangler@3 pages project create slash-docs --production-branch=main
+          fi
+
       - name: Publicar no Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
