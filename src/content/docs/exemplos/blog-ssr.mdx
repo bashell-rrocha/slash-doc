@@ -20,7 +20,6 @@ Este exemplo demonstra como criar um blog completo usando Slash com Server-Side 
 - ✅ Sistema de comentários
 - ✅ Data loading isomórfico
 - ✅ Meta tags dinâmicas para SEO
-- ✅ Markdown rendering
 
 ## Estrutura do Projeto
 
@@ -37,7 +36,8 @@ src/
 │   ├── PostListPage.ts    # Lista com states (cliente)
 │   └── Comments.ts        # Comentários com states (cliente)
 ├── shared/
-│   ├── view.ts            # html no cliente, htmlString no servidor
+│   ├── view.ts            # html no cliente, htmlString no servidor, helper text()
+│   ├── api.ts             # URL base da API (absoluta no servidor)
 │   ├── components/
 │   │   ├── Layout.ts      # Layout base
 │   │   ├── PostList.ts    # View pura da lista de posts
@@ -95,6 +95,12 @@ import { htmlString } from '@_bashell/slash/ssr'
 
 // No servidor htmlString gera HTML; no navegador html gera nós DOM
 export const view = (typeof document === 'undefined' ? htmlString : html) as typeof html
+
+// Texto de usuário (título, resumo, tags, nome do autor, conteúdo) deve passar por text().
+// No SSR, uma string que começa com `<` é tratada como HTML pronto e NÃO é escapada;
+// o espaço inicial impede isso, e o htmlString passa a escapar o valor normalmente.
+// No cliente o `html` já cria nós de texto, então o espaço é inofensivo.
+export const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
 ```
 
 <Aside type="note">
@@ -103,17 +109,28 @@ Event handlers (`onClick`, `onInput`...) são ignorados no servidor e só passam
 
 ## Data Loaders Isomórficos
 
+No navegador, `fetch('/api/...')` com caminho relativo funciona. No servidor Node não existe origem base, então um caminho relativo falha. Os loaders usam `ctx.isServer` para escolher uma URL absoluta no servidor (se preferir, chame direto a camada de dados em vez de passar por HTTP):
+
+```typescript title="src/shared/api.ts"
+// No servidor a API precisa de URL absoluta; no navegador o caminho relativo basta
+const SERVER_ORIGIN = 'http://localhost:3000' // ajuste para o seu ambiente
+
+export const apiUrl = (path: string, isServer: boolean): string =>
+  isServer ? `${SERVER_ORIGIN}${path}` : path
+```
+
 `createLoader(fn, { key, ttl })` recebe uma função que lê `{ params }` e devolve uma função assíncrona. No servidor ela sempre executa; no cliente o resultado fica em cache por `key + params`:
 
 ```typescript title="src/shared/loaders/posts.ts"
 import { createLoader } from '@_bashell/slash/ssr'
+import { apiUrl } from '../api'
 import type { Post, PostListResponse } from '../types'
 
 // Loader para lista de posts com cache de 5 minutos
 export const postsLoader = createLoader<PostListResponse>(
-  async ({ params }) => {
+  async ({ params, isServer }) => {
     const response = await fetch(
-      `/api/posts?page=${params.page ?? '1'}&pageSize=${params.pageSize ?? '10'}`
+      apiUrl(`/api/posts?page=${params.page ?? '1'}&pageSize=${params.pageSize ?? '10'}`, isServer)
     )
     if (!response.ok) throw new Error('Failed to load posts')
     return response.json()
@@ -123,8 +140,8 @@ export const postsLoader = createLoader<PostListResponse>(
 
 // Loader para post individual com cache de 10 minutos
 export const postLoader = createLoader<Post>(
-  async ({ params }) => {
-    const response = await fetch(`/api/posts/${params.slug}`)
+  async ({ params, isServer }) => {
+    const response = await fetch(apiUrl(`/api/posts/${params.slug}`, isServer))
     if (!response.ok) throw new Error('Post not found')
     return response.json()
   },
@@ -134,11 +151,12 @@ export const postLoader = createLoader<Post>(
 
 ```typescript title="src/shared/loaders/comments.ts"
 import { createLoader } from '@_bashell/slash/ssr'
+import { apiUrl } from '../api'
 import type { Comment } from '../types'
 
 export const commentsLoader = createLoader<Comment[]>(
-  async ({ params }) => {
-    const response = await fetch(`/api/posts/${params.postId}/comments`)
+  async ({ params, isServer }) => {
+    const response = await fetch(apiUrl(`/api/posts/${params.postId}/comments`, isServer))
     if (!response.ok) throw new Error('Failed to load comments')
     return response.json()
   },
@@ -189,7 +207,7 @@ export const Layout = ({ children }: LayoutProps) => view`
 A view é pura (recebe dados por props), então serve ao servidor e ao cliente. A versão do cliente guarda a página e os dados em states **fora** do componente e os lê dentro do componente:
 
 ```typescript title="src/shared/components/PostList.ts"
-import { view } from '../view'
+import { view, text } from '../view'
 import type { PostListResponse } from '../types'
 
 const formatDate = (date: string): string =>
@@ -209,15 +227,15 @@ export const PostListView = ({ data, onPrev, onNext }: PostListViewProps) => vie
     <div class="posts">
       ${data.posts.map((post) => view`
         <article class="post-card">
-          <h2><a href=${`/posts/${post.slug}`}>${post.title}</a></h2>
+          <h2><a href=${`/posts/${post.slug}`}>${text(post.title)}</a></h2>
           <div class="post-meta">
-            <span class="author-name">${post.author.name}</span>
+            <span class="author-name">${text(post.author.name)}</span>
             <time datetime=${post.publishedAt}>${formatDate(post.publishedAt)}</time>
             <span>${post.readTime} min read</span>
           </div>
-          <p class="post-excerpt">${post.excerpt}</p>
+          <p class="post-excerpt">${text(post.excerpt)}</p>
           <div class="post-tags">
-            ${post.tags.map((tag) => view`<span class="tag">${tag}</span>`)}
+            ${post.tags.map((tag) => view`<span class="tag">${text(tag)}</span>`)}
           </div>
         </article>
       `)}
@@ -365,7 +383,7 @@ export const Comments = ({ postId }: { postId: string }) => html`
 Visualização de um post, também como view pura:
 
 ```typescript title="src/shared/components/PostDetail.ts"
-import { view } from '../view'
+import { view, text } from '../view'
 import type { Post } from '../types'
 
 const formatDate = (date: string): string =>
@@ -375,19 +393,19 @@ const formatDate = (date: string): string =>
 export const PostDetail = ({ post, comments }: { post: Post; comments?: unknown }) => view`
   <article class="post-detail">
     <header class="post-header">
-      <h1>${post.title}</h1>
+      <h1>${text(post.title)}</h1>
       <div class="post-meta">
-        <span class="author-name">${post.author.name}</span>
+        <span class="author-name">${text(post.author.name)}</span>
         <time datetime=${post.publishedAt}>${formatDate(post.publishedAt)}</time>
         <span>${post.readTime} min read</span>
       </div>
       <div class="post-tags">
-        ${post.tags.map((tag) => view`<span class="tag">${tag}</span>`)}
+        ${post.tags.map((tag) => view`<span class="tag">${text(tag)}</span>`)}
       </div>
     </header>
 
     <div class="post-content">
-      <p>${post.content}</p>
+      <p>${text(post.content)}</p>
     </div>
 
     <footer class="post-footer">
@@ -400,7 +418,7 @@ export const PostDetail = ({ post, comments }: { post: Post; comments?: unknown 
 ```
 
 <Aside type="caution">
-`post.content` é interpolado como texto. No SSR, uma string que **começa com `<`** é tratada como HTML pronto e emitida sem escape, inclusive o resultado de `${post.content}`. Se o conteúdo vier de usuários ou de markdown, converta e **sanitize** o HTML antes, ou escape o texto, para não abrir XSS.
+**Todo campo vindo de usuário é texto não confiável**: `title`, `excerpt`, `tags`, `author.name` e `content`, não só o conteúdo. No SSR, uma string que **começa com `<`** é tratada como HTML pronto e emitida sem escape, em qualquer interpolação. Por isso estes campos passam por `text()` (veja `view.ts`). Se o conteúdo for markdown ou HTML de verdade, converta e **sanitize** antes de inseri-lo como HTML; nunca o interpole cru.
 </Aside>
 
 ## Servidor HTTP
@@ -409,13 +427,22 @@ O servidor carrega os dados **antes** de renderizar, renderiza com `renderToStri
 
 ```typescript title="src/server/index.ts"
 import http from 'node:http'
-import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { Layout } from '../shared/components/Layout'
 import { PostListView } from '../shared/components/PostList'
 import { PostDetail } from '../shared/components/PostDetail'
 import { postsLoader, postLoader } from '../shared/loaders/posts'
 
 const PORT = process.env.PORT || 3000
+
+// Escapa texto antes de colocá-lo em HTML montado à mão (title, meta...)
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url!, `http://${req.headers.host}`)
@@ -453,24 +480,24 @@ const server = http.createServer(async (req, res) => {
     // renderToString devolve { html, state }
     const { html: markup } = renderToString(() => Layout({ children: body() }))
 
-    const page = htmlString`
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>${title}</title>
-          <link rel="stylesheet" href="/public/styles.css" />
-        </head>
-        <body>
-          <div id="app">${markup}</div>
-          <script id="__LOADER_DATA__" type="application/json">${serializeStateForScript(loaderData)}</script>
-          <script type="module" src="/public/client.js"></script>
-        </body>
-      </html>
-    `
+    // O documento é um template literal comum: htmlString com <!DOCTYPE> não funciona
+    // e, dentro dele, o JSON seria escapado como texto. O JSON usa serializeStateForScript.
+    const page = `<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(title)}</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <div id="app">${markup}</div>
+    <script id="__LOADER_DATA__" type="application/json">${serializeStateForScript(loaderData)}</script>
+    <script type="module" src="/public/client.js"></script>
+  </body>
+</html>`
 
-    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end(page)
   } catch (error) {
     console.error('SSR Error:', error)
@@ -485,7 +512,7 @@ server.listen(PORT, () => {
 ```
 
 <Aside type="caution">
-O `markup` e o `title` entram na página por `htmlString`. Como `markup` começa com `<`, ele é emitido como HTML pronto (é o que queremos). O `title` é texto e é escapado, desde que não comece com `<`. Os dados dos loaders vão para o script JSON apenas por `serializeStateForScript`, nunca por `JSON.stringify` cru.
+O documento é montado com um template literal comum. O `markup` (já renderizado pelo Slash, onde os campos de usuário passaram por `text()`) entra como está. O `title` vem de dado de usuário e é escapado à mão com `escapeHtml`. Os dados dos loaders vão para o script JSON apenas por `serializeStateForScript`, que escapa `<`, `>` e `&`; nunca use `JSON.stringify` cru nem interpole o JSON por `htmlString`, que o escaparia como texto e quebraria o `JSON.parse` do cliente.
 </Aside>
 
 ## Cliente (Hidratação)
@@ -591,17 +618,19 @@ bun run start
 
 ### 1. Streaming SSR
 
-Para páginas grandes, use streaming:
+`renderToStream` envia a resposta em chunks, mas renderiza a árvore inteira antes do primeiro chunk: ele **não** melhora o tempo até o primeiro byte. Use-o apenas se quiser escrever a resposta em partes. O documento (head e tail) é texto comum, e o script `__SLASH_STATE__` vem no fim do stream:
 
 ```typescript
-import { renderToStream } from '@_bashell/slash/ssr'
+import { renderToStream, serializeStateForScript } from '@_bashell/slash/ssr'
 
-// No servidor: renderToStream é um async generator de strings
-res.writeHead(200, { 'Content-Type': 'text/html' })
+res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+res.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8" /><title>${escapeHtml(title)}</title></head><body><div id="app">`)
 for await (const chunk of renderToStream(() => Layout({ children: body() }))) {
   res.write(chunk)
 }
-res.end()
+res.end(`</div>
+<script id="__LOADER_DATA__" type="application/json">${serializeStateForScript(loaderData)}</script>
+<script type="module" src="/public/client.js"></script></body></html>`)
 ```
 
 ### 2. Cache de Loaders
@@ -648,7 +677,7 @@ invalidateLoader()
 2. **Hidratação**: o cliente limpa o HTML do servidor e renderiza de novo com os mesmos dados (o HTML do servidor não é reaproveitado)
 3. **Loaders Isomórficos**: Mesmo código funciona em servidor e cliente
 4. **Cache Compartilhado**: `hydrateLoaderCache` evita fetches desnecessários no cliente
-5. **Performance**: SSR + streaming = Time to First Byte baixo
+5. **Segurança**: dado de usuário passa por `text()` ou `escapeHtml`; o JSON da página sai de `serializeStateForScript`
 
 ## Próximos Passos
 

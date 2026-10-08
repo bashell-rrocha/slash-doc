@@ -160,13 +160,14 @@ my-slash-ssr/
 #### src/server.ts
 
 ```typescript
-import { renderToString } from '@_bashell/slash'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App'
 
 const server = Bun.serve({
   port: 3000,
   async fetch(req) {
-    const html = renderToString(App())
+    // renderToString retorna { html, state }
+    const { html, state } = renderToString(App)
 
     return new Response(`
       <!DOCTYPE html>
@@ -177,11 +178,12 @@ const server = Bun.serve({
       </head>
       <body>
         <div id="app">${html}</div>
+        <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
         <script type="module" src="/client.js"></script>
       </body>
       </html>
     `, {
-      headers: { 'Content-Type': 'text/html' }
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   }
 })

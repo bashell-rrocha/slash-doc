@@ -298,27 +298,31 @@ function safeRender(
 ### Uso em SSR
 
 ```typescript
-import { renderToString, safeRender } from '@_bashell/slash'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { safeRender } from '@_bashell/slash'
 
-// No servidor
+// No servidor (Express). `App` é um componente feito com htmlString
 app.get('*', (req, res) => {
-  const html = safeRender(
-    () => renderToString(html`<${App} url=${req.url} />`),
+  const body = safeRender(
+    () => {
+      const { html, state } = renderToString(() => App({ url: req.url }))
+      return `<div id="root">${html}</div>
+        <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>`
+    },
     (error) => {
       console.error('Erro SSR:', error)
       return `<div class="error">Erro ao renderizar página</div>`
     }
   )
 
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <body>
-        <div id="root">${html}</div>
-        <script src="/client.js"></script>
-      </body>
-    </html>
-  `)
+  // O documento é um template literal comum (não use htmlString com <!DOCTYPE>)
+  res.send(`<!DOCTYPE html>
+<html>
+  <body>
+    ${body}
+    <script src="/client.js"></script>
+  </body>
+</html>`)
 })
 ```
 
