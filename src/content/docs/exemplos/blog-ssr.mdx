@@ -464,7 +464,6 @@ const server = http.createServer(async (req, res) => {
         </head>
         <body>
           <div id="app">${markup}</div>
-          <script id="__SLASH_STATE__" type="application/json">{}</script>
           <script id="__LOADER_DATA__" type="application/json">${serializeStateForScript(loaderData)}</script>
           <script type="module" src="/public/client.js"></script>
         </body>
@@ -520,7 +519,7 @@ if (path === '/') {
 }
 
 if (content) {
-  // Há HTML do servidor e o script __SLASH_STATE__: render() limpa o container e renderiza no cliente
+  // render() limpa o HTML do servidor no container e renderiza no cliente
   render(Layout({ children: content }), '#app')
 }
 ```
