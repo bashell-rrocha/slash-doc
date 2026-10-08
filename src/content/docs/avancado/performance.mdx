@@ -237,13 +237,8 @@ function Component() {
   // Cleanup quando elemento for destruído
   const cleanup = () => unwatch();
 
-  // Registra cleanup no elemento
-  if (el instanceof Node) {
-    const { addCleanup } = require('@_bashell/slash/lifecycle/cleanup');
-    addCleanup(el, cleanup);
-  }
-
-  return el;
+  // Devolva cleanup junto com o elemento: quem remove o elemento da página chama cleanup()
+  return { el, cleanup };
 }
 ```
 

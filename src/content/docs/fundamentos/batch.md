@@ -550,15 +550,17 @@ animateElement()
 const set = (payload: S) => {
   // ...
 
-  if (isInBatch()) {
-    __recordBatchUpdate() // Apenas registra
-  } else {
-    _notifyHandlers(deepClone(_state)) // Notifica imediatamente
+  if (shouldNotifyWatchers(command)) {
+    if (isInBatch()) {
+      __enqueueBatchNotify(_notifyFinal) // Enfileira o notificador (deduplicado)
+    } else {
+      _notifyHandlers(deepClone(_state)) // Notifica imediatamente
+    }
   }
 }
 ```
 
-**Implementação:** [src/state.ts](../../src/state.ts:66-91)
+**Implementação:** `src/state.ts` (trecho simplificado)
 
 ### Verificar se Está em Batch
 
