@@ -103,7 +103,7 @@ function Counter() {
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -138,15 +138,16 @@ function Example() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+
+// Função pura, sem cache automático
+const doubled = () => {
+  console.log('Computing doubled')
+  return count.get() * 2
+}
+
+// Monte como <${Example} />: ler count.get() inscreve o componente
 function Example() {
-  const count = createState(0)
-
-  // Função pura, sem cache automático
-  const doubled = () => {
-    console.log('Computing doubled')
-    return count.get() * 2
-  }
-
   return html`<p>Doubled: ${doubled()}</p>`
 }
 ```
@@ -183,20 +184,20 @@ function Timer() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Watcher explícito (criado uma vez, fora do componente)
+seconds.watch((newVal) => {
+  console.log('Seconds:', newVal)
+})
+
+// Slash não tem onCleanup público: você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  // Watcher explícito
-  seconds.watch((newVal) => {
-    console.log('Seconds:', newVal)
-  })
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>${seconds.get()}</p>`
 }
 ```
@@ -231,12 +232,12 @@ function TodoList() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function TodoList() {
-  const todos = createState([
-    { id: 1, text: 'Learn Slash' },
-    { id: 2, text: 'Build app' }
-  ])
+const todos = createState([
+  { id: 1, text: 'Learn Slash' },
+  { id: 2, text: 'Build app' }
+])
 
+function TodoList() {
   return html`
     <ul>
       ${todos.get().map(todo => html`
@@ -317,19 +318,20 @@ function Example() {
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+const name = createState('John')
+
+// Observer explícito (criado uma vez, fora do componente)
+count.watch((newCount) => {
+  console.log('Count changed:', newCount)
+})
+
+// Dependência implícita por componente: count.get() no render inscreve o componente
 function Example() {
-  const count = createState(0)
-  const name = createState('John')
-
-  // Explicitamente define dependência
-  count.watch((newCount) => {
-    console.log('Count changed:', newCount)
-  })
-
   return html`
     <div>
       <p>${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>+</button>
+      <button onClick=${() => count.set(count.get() + 1)}>+</button>
     </div>
   `
 }
@@ -338,12 +340,12 @@ function Example() {
 **Como funciona:**
 1. Sem compiler, tudo é runtime
 2. `.get()` lê valor, `.set()` atualiza
-3. `.watch()` registra callbacks explícitos
-4. Developer controla quando e como observar
+3. `.get()` durante a execução de um componente o inscreve no state; o componente re-executa quando o state muda
+4. `.watch()` registra callbacks explícitos fora do componente
 
 <Aside type="tip">
 **Auto-tracking (SolidJS):** Mais conveniente, menos boilerplate.
-**Manual tracking (Slash):** Mais explícito, mais previsível, sem magic.
+**Tracking por componente (Slash):** Mais explícito e previsível, mas a granularidade é o componente, não o ponto de uso.
 </Aside>
 
 ---
@@ -498,8 +500,8 @@ response.send(fullHtml)
 | `<For>` | `.map()` | JS nativo |
 | `<Show>` | Ternário `? :` | JS nativo |
 | `<Switch>`/`<Match>` | `switch` | JS nativo |
-| `onMount()` | Código direto | Executa ao criar |
-| `onCleanup()` | `onCleanup()` | Idêntico |
+| `onMount()` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
+| `onCleanup()` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 
 ### Exemplo de Migração
 
@@ -534,19 +536,19 @@ function TodoApp() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const todos = createState([])
+const filter = createState('all')
+
+const filteredTodos = () => {
+  const f = filter.get()
+  return todos.get().filter(t => {
+    if (f === 'active') return !t.done
+    if (f === 'done') return t.done
+    return true
+  })
+}
+
 function TodoApp() {
-  const todos = createState([])
-  const filter = createState('all')
-
-  const filteredTodos = () => {
-    const f = filter.get()
-    return todos.get().filter(t => {
-      if (f === 'active') return !t.done
-      if (f === 'done') return t.done
-      return true
-    })
-  }
-
   return html`
     <ul>
       ${filteredTodos().map(todo => html`

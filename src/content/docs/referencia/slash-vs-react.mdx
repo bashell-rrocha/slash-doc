@@ -177,14 +177,16 @@ function Greeting({ name }) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Greeting({ name }) {
-  const count = createState(0)
+// Slash não tem estado local por instância: o state vive fora do componente
+// (dentro dele seria recriado a cada render). Monte como <${Greeting} name="..." />
+const count = createState(0)
 
+function Greeting({ name }) {
   return html`
     <div>
       <h1>Hello ${name}</h1>
       <p>Clicked ${count.get()} times</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Click
       </button>
     </div>
@@ -219,16 +221,16 @@ function Timer() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Slash não tem useEffect nem onCleanup: o efeito vive fora do componente
+// e você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  // Cleanup automático quando componente desmonta
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>Seconds: ${seconds.get()}</p>`
 }
 ```
@@ -271,28 +273,23 @@ function LoginForm() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function LoginForm() {
-  const email = createState('')
-  const password = createState('')
+const form = createState({ email: '', password: '' })
 
+// Os campos não leem o state no render, então não são recriados a cada tecla
+function LoginForm() {
   const handleSubmit = (e: Event) => {
     e.preventDefault()
-    console.log({
-      email: email.get(),
-      password: password.get()
-    })
+    console.log(form.get())
   }
 
   return html`
-    <form onsubmit=${handleSubmit}>
+    <form onSubmit=${handleSubmit}>
       <input
-        value=${email.get()}
-        oninput=${(e) => email.set(e.target.value)}
+        onInput=${(e) => form.set({ ...form.get(), email: e.target.value })}
       />
       <input
         type="password"
-        value=${password.get()}
-        oninput=${(e) => password.set(e.target.value)}
+        onInput=${(e) => form.set({ ...form.get(), password: e.target.value })}
       />
       <button type="submit">Login</button>
     </form>
@@ -305,7 +302,7 @@ function LoginForm() {
 
 **Observações:**
 - React tem mais boilerplate (`useState`, `useEffect`, etc)
-- Slash é mais direto (state reativo e cleanup simples)
+- Slash é mais direto, mas não tem estado local nem hooks de efeito: o state fica fora do componente e efeitos/cleanup são por sua conta
 - Ambos têm boa DX, mas Slash é mais minimalista
 
 ---
@@ -422,7 +419,7 @@ Se você precisa de um ecossistema maduro e extenso, React é a escolha mais seg
 
 **O que muda:**
 - `useState` → `createState`
-- `useEffect` → `state.watch()` ou `onCleanup`
+- `useEffect` → `state.watch()` (criado fora do componente; não há `onCleanup` público)
 - `useMemo` → Não necessário (pode usar funções puras)
 - JSX → `html` template tag (ou hyperscript)
 
@@ -454,19 +451,22 @@ function TodoItem({ todo, onToggle }) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+// Sem estado local por instância: guarde qual item está em edição fora do componente
+const editingId = createState<number | null>(null)
+
 function TodoItem({ todo, onToggle }) {
-  const isEditing = createState(false)
+  const isEditing = editingId.get() === todo.id
 
   return html`
     <li>
-      ${isEditing.get() ? html`
+      ${isEditing ? html`
         <input value=${todo.text} />
       ` : html`
-        <span onclick=${() => onToggle(todo.id)}>
+        <span onClick=${() => onToggle(todo.id)}>
           ${todo.text}
         </span>
       `}
-      <button onclick=${() => isEditing.set(!isEditing.get())}>
+      <button onClick=${() => editingId.set(isEditing ? null : todo.id)}>
         Edit
       </button>
     </li>

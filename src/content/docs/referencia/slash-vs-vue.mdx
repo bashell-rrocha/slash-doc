@@ -68,17 +68,19 @@ Slash usa Observer Pattern com API explícita:
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
+// O state fica fora do componente (dentro dele seria recriado a cada render)
+const count = createState(0)
+
+// Computed manual
+const doubled = () => count.get() * 2
+
+// Monte como <${Counter} />
 function Counter() {
-  const count = createState(0)
-
-  // Computed manual
-  const doubled = () => count.get() * 2
-
   return html`
     <div>
       <p>Count: ${count.get()}</p>
       <p>Doubled: ${doubled()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -90,12 +92,12 @@ function Counter() {
 1. `createState()` cria estado reativo
 2. `get()` lê valor, `set()` atualiza
 3. `watch()` registra observers
-4. Update direto no DOM (sem VDOM)
-5. Sem tracking automático de dependências
+4. O componente que leu `get()` re-executa e substitui seus nós (sem VDOM)
+5. Tracking por componente: o que o componente lê durante a execução vira dependência
 6. Sem compiler, tudo em runtime
 
 <Aside type="note">
-Vue tem tracking automático de dependências. Slash requer `.get()` explícito. Trade-off: Vue é mais conveniente, Slash é mais explícito e previsível.
+Vue rastreia dependências por propriedade. No Slash o rastreio é por componente, via `.get()` explícito: ler um state no render inscreve o componente inteiro. Trade-off: Vue é mais granular e conveniente, Slash é mais explícito e previsível.
 </Aside>
 
 ---
@@ -127,13 +129,14 @@ const count = ref(0)
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Counter() {
-  const count = createState(0)
+// State fora do componente; monte como <${Counter} />
+const count = createState(0)
 
+function Counter() {
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -186,7 +189,7 @@ function MyComponent({ title, count, onUpdate }: Props) {
     <div>
       <h2>${title}</h2>
       <p>${count}</p>
-      <button onclick=${() => onUpdate(count + 1)}>
+      <button onClick=${() => onUpdate(count + 1)}>
         Update
       </button>
     </div>
@@ -228,30 +231,34 @@ watch(fullName, (newVal) => {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const firstName = createState('John')
+const lastName = createState('Doe')
+
+// Computed como função
+const fullName = () =>
+  `${firstName.get()} ${lastName.get()}`
+
+// Watcher (criado uma vez, fora do componente)
+firstName.watch((newVal) => {
+  console.log('First name changed:', newVal)
+})
+
+// Só este componente lê os states
+const FullName = () => html`<p>${fullName()}</p>`
+
+// Os inputs não leem states, então não são recriados a cada tecla
 function NameForm() {
-  const firstName = createState('John')
-  const lastName = createState('Doe')
-
-  // Computed como função
-  const fullName = () =>
-    `${firstName.get()} ${lastName.get()}`
-
-  // Watcher
-  firstName.watch((newVal) => {
-    console.log('First name changed:', newVal)
-  })
-
   return html`
     <div>
       <input
-        value=${firstName.get()}
-        oninput=${(e) => firstName.set(e.target.value)}
+        value="John"
+        onInput=${(e) => firstName.set(e.target.value)}
       />
       <input
-        value=${lastName.get()}
-        oninput=${(e) => lastName.set(e.target.value)}
+        value="Doe"
+        onInput=${(e) => lastName.set(e.target.value)}
       />
-      <p>${fullName()}</p>
+      <${FullName} />
     </div>
   `
 }
@@ -289,16 +296,16 @@ onUnmounted(() => {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Slash não tem onMounted/onUnmounted: o efeito vive fora do componente
+// e você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  // Cleanup automático
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>Seconds: ${seconds.get()}</p>`
 }
 ```
@@ -490,9 +497,9 @@ Vue oferece melhor DX com compiler. Slash é mais simples e direto, sem magic.
 | `watch()` | `state.watch()` | API similar (Observer Pattern) |
 | `v-if` | Ternário `? :` | JavaScript nativo |
 | `v-for` | `.map()` | JavaScript nativo |
-| `v-model` | `value` + `oninput` | Binding manual |
-| `onMounted` | Código direto | Executa na criação |
-| `onUnmounted` | `onCleanup()` | Cleanup function |
+| `v-model` | `onInput` + `state.set()` (ou `textFieldControl`) | Binding manual |
+| `onMounted` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
+| `onUnmounted` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 | `props` | Function params | TypeScript interfaces |
 | `emit` | Callbacks | Funções em props |
 
@@ -536,26 +543,26 @@ function addTodo(text) {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const todos = createState([])
+const filter = createState('all')
+
+const filteredTodos = () => {
+  const f = filter.get()
+  const t = todos.get()
+
+  if (f === 'active') return t.filter(t => !t.done)
+  if (f === 'completed') return t.filter(t => t.done)
+  return t
+}
+
+const addTodo = (text) => {
+  todos.set([
+    ...todos.get(),
+    { id: Date.now(), text, done: false }
+  ])
+}
+
 function TodoList() {
-  const todos = createState([])
-  const filter = createState('all')
-
-  const filteredTodos = () => {
-    const f = filter.get()
-    const t = todos.get()
-
-    if (f === 'active') return t.filter(t => !t.done)
-    if (f === 'completed') return t.filter(t => t.done)
-    return t
-  }
-
-  const addTodo = (text) => {
-    todos.set([
-      ...todos.get(),
-      { id: Date.now(), text, done: false }
-    ])
-  }
-
   return html`
     <div>
       <ul>
