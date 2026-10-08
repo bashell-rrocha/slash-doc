@@ -192,6 +192,8 @@ function MyComponent() { ... }
 
 #### 5. Batch Aninhado
 
+Batches aninhados funcionam (as notificações ocorrem no fim do batch mais externo); o aviso existe porque o batch interno é redundante.
+
 ```typescript
 import { batch, createState } from '@_bashell/slash';
 

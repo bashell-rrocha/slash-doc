@@ -345,12 +345,11 @@ const router = createRouter({
 import { createState } from '@_bashell/slash'
 
 const hasUnsavedChanges = createState(false)
+let content = '' // texto em edição: não é lido no render, então o <textarea> não é recriado
 
 function Editor({ router }) {
-  const content = createState('')
-
   const handleInput = (e: Event) => {
-    content.set((e.target as HTMLTextAreaElement).value)
+    content = (e.target as HTMLTextAreaElement).value
     hasUnsavedChanges.set(true)
   }
 
@@ -363,7 +362,7 @@ function Editor({ router }) {
   return html`
     <div>
       <h1>Editor</h1>
-      <textarea onInput=${handleInput}>${content}</textarea>
+      <textarea onInput=${handleInput}></textarea>
       <button onClick=${handleSave}>Salvar</button>
     </div>
   `

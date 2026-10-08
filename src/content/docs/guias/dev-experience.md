@@ -316,7 +316,7 @@ const Component = () => {
   return result
 }
 
-render(Component(), '#app')
+render(html`<${Component} />`, '#app')
 ```
 
 ### Performance Marks

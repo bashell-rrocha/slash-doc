@@ -177,29 +177,32 @@ function catchAsync<T>(
 ### Uso básico
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
-import { catchAsync } from '@_bashell/slash'
+import { html, createState, render, catchAsync } from '@_bashell/slash'
 
-function UserProfile({ userId }: { userId: number }) {
-  const userData = createState<any>(null)
+// State e função segura ficam fora do componente: o componente re-executa
+// quando o que ele lê muda, e criar/disparar isso no corpo repetiria o fetch
+const userData = createState<any>(null)
+let userId = 1
 
-  // Criar função segura que captura erros
-  const [fetchUser, getError] = catchAsync(
-    async () => {
-      const res = await fetch(`/api/users/${userId}`)
-      if (!res.ok) throw new Error('Falha ao carregar usuário')
-      return res.json()
-    },
-    (error) => {
-      console.error('Erro ao buscar usuário:', error)
-    }
-  )
+// Criar função segura que captura erros
+const [fetchUser, getError] = catchAsync(
+  async () => {
+    const res = await fetch(`/api/users/${userId}`)
+    if (!res.ok) throw new Error('Falha ao carregar usuário')
+    return res.json()
+  },
+  (error) => {
+    console.error('Erro ao buscar usuário:', error)
+  }
+)
 
-  // Executar fetch
-  fetchUser().then((data) => {
-    if (data) userData.set(data)
-  })
+const loadUser = async () => {
+  const data = await fetchUser()
+  if (data) userData.set(data)
+}
 
+function UserProfile() {
+  // Leia todos os states no topo: getError() e userData.get() inscrevem o componente
   const error = getError()
   const user = userData.get()
 
@@ -207,7 +210,7 @@ function UserProfile({ userId }: { userId: number }) {
     return html`
       <div class="error">
         <p>Erro: ${error.message}</p>
-        <button onClick=${() => fetchUser()}>Tentar novamente</button>
+        <button onClick=${loadUser}>Tentar novamente</button>
       </div>
     `
   }
@@ -223,42 +226,48 @@ function UserProfile({ userId }: { userId: number }) {
     </div>
   `
 }
+
+// Monte como <${UserProfile} /> e dispare o carregamento fora do componente
+render(html`<${UserProfile} />`, '#app')
+loadUser()
 ```
 
 ### Exemplo: Múltiplas operações assíncronas
 
 ```typescript
-import { html, createState } from '@_bashell/slash'
-import { catchAsync } from '@_bashell/slash'
+import { html, createState, render, catchAsync } from '@_bashell/slash'
 
-function DataDashboard() {
-  const data = createState<any>(null)
+const data = createState<any>(null)
 
-  const [fetchData1, getError1] = catchAsync(async () => {
-    const res = await fetch('/api/data1')
-    return res.json()
-  })
+const [fetchData1, getError1] = catchAsync(async () => {
+  const res = await fetch('/api/data1')
+  return res.json()
+})
 
-  const [fetchData2, getError2] = catchAsync(async () => {
-    const res = await fetch('/api/data2')
-    return res.json()
-  })
+const [fetchData2, getError2] = catchAsync(async () => {
+  const res = await fetch('/api/data2')
+  return res.json()
+})
 
-  const [fetchData3, getError3] = catchAsync(async () => {
-    const res = await fetch('/api/data3')
-    return res.json()
-  })
+const [fetchData3, getError3] = catchAsync(async () => {
+  const res = await fetch('/api/data3')
+  return res.json()
+})
 
-  // Executar todas as requisições
+// Executar todas as requisições (fora do componente)
+const loadAll = () =>
   Promise.all([fetchData1(), fetchData2(), fetchData3()]).then(
     ([data1, data2, data3]) => {
       data.set({ data1, data2, data3 })
     }
   )
 
+function DataDashboard() {
+  // Leia tudo no topo para inscrever o componente
   const error1 = getError1()
   const error2 = getError2()
   const error3 = getError3()
+  const current = data.get()
 
   return html`
     <div>
@@ -266,10 +275,13 @@ function DataDashboard() {
       ${error2 && html`<p class="error">Erro ao carregar dados 2</p>`}
       ${error3 && html`<p class="error">Erro ao carregar dados 3</p>`}
 
-      ${data.get() && html`<pre>${JSON.stringify(data.get(), null, 2)}</pre>`}
+      ${current && html`<pre>${JSON.stringify(current, null, 2)}</pre>`}
     </div>
   `
 }
+
+render(html`<${DataDashboard} />`, '#app')
+loadAll()
 ```
 
 ## safeRender

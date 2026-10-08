@@ -226,21 +226,22 @@ function Component() {
   return html`<div>...</div>`;
 }
 
-// ✅ BOM: Cleanup apropriado
+// ✅ BOM: crie o watcher uma vez, fora do componente, e guarde o unwatch
+const unwatch = globalState.watch((state) => {
+  console.log('State changed:', state);
+});
+
 function Component() {
-  const unwatch = globalState.watch((state) => {
-    console.log('State changed:', state);
-  });
-
-  const el = html`<div>...</div>` as HTMLElement;
-
-  // Cleanup quando elemento for destruído
-  const cleanup = () => unwatch();
-
-  // Devolva cleanup junto com o elemento: quem remove o elemento da página chama cleanup()
-  return { el, cleanup };
+  return html`<div>...</div>`;
 }
+
+// Quando não precisar mais:
+unwatch();
 ```
+
+<Aside type="note">
+Um componente re-executa quando um state que ele leu muda, então tudo que ele cria no corpo é criado de novo. Watchers, timers e listeners manuais pertencem fora do componente. O Slash não exporta uma API para registrar cleanup próprio em um nó (`addCleanup` é interno): veja [Lifecycle e Cleanup](/componentes/lifecycle/).
+</Aside>
 
 ### Use WeakMap para Cache
 
@@ -262,99 +263,77 @@ function cacheData(obj: object, data: any) {
 // Quando obj não tem mais referências, é GC automaticamente
 ```
 
-### Destrua Nós Antigos
+### Destrua Nós Removidos à Mão
+
+`render()` já destrói os nós anteriores do container antes de renderizar. Só chame `destroyNode()` quando você remover nós criados pelo Slash por conta própria:
 
 ```typescript
-import { render, destroyNode } from '@_bashell/slash';
+import { destroyNode } from '@_bashell/slash';
 
-const container = document.querySelector('#app');
-const view1 = html`<div>View 1</div>`;
+const node = document.querySelector('#widget')!;
 
-// ✅ BOM: Destruir antes de trocar view
-const oldNodes = Array.from(container.childNodes);
-oldNodes.forEach(node => destroyNode(node));
-
-// Agora renderiza nova view
-render(view2, container);
+destroyNode(node); // executa as limpezas do Slash (listeners, inscrições)
+node.remove();
 ```
 
 ## Cleanup Patterns
 
-### Pattern 1: Componente com Estado Local
+Sem API pública de cleanup por nó, o padrão é manter o recurso fora do componente e encerrá-lo explicitamente.
+
+### Pattern 1: Timer controlado por handlers
 
 ```typescript
-import { html, createState } from '@_bashell/slash';
-import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+import { html, createState, render } from '@_bashell/slash';
+
+const time = createState(0);
+let interval: ReturnType<typeof setInterval> | null = null;
+
+const start = () => {
+  if (!interval) interval = setInterval(() => time.set(time.get() + 1), 1000);
+};
+
+const stop = () => {
+  if (interval) clearInterval(interval);
+  interval = null;
+};
 
 function Timer() {
-  // Estado local do componente
-  const time = createState(0);
-
-  // Interval
-  const interval = setInterval(() => {
-    time.set(time.get() + 1);
-  }, 1000);
-
-  const el = html`
-    <div>Time: ${time.get()}</div>
-  ` as HTMLElement;
-
-  // Cleanup: parar interval
-  addCleanup(el, () => {
-    clearInterval(interval);
-  });
-
-  return el;
+  return html`
+    <div>
+      <p>Time: ${time.get()}</p>
+      <button onClick=${start}>Start</button>
+      <button onClick=${stop}>Stop</button>
+    </div>
+  `;
 }
+
+render(html`<${Timer} />`, '#app');
 ```
 
-### Pattern 2: Event Listeners
+### Pattern 2: Listeners globais
 
 ```typescript
-import { html } from '@_bashell/slash';
-import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+const handler = () => console.log('Window resized:', window.innerWidth);
 
-function WindowResizeTracker() {
-  const handler = () => {
-    console.log('Window resized:', window.innerWidth);
-  };
-
-  // Registra listener
-  window.addEventListener('resize', handler);
-
-  const el = html`<div>Tracking resize</div>` as HTMLElement;
-
-  // Cleanup: remover listener
-  addCleanup(el, () => {
-    window.removeEventListener('resize', handler);
-  });
-
-  return el;
-}
+// Registre e remova em código que você controla (não no corpo do componente)
+export const startTracking = () => window.addEventListener('resize', handler);
+export const stopTracking = () => window.removeEventListener('resize', handler);
 ```
 
-### Pattern 3: Recursos Externos
+### Pattern 3: Recursos externos
 
 ```typescript
-import { html } from '@_bashell/slash';
-import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+let ws: WebSocket | null = null;
 
-function WebSocketComponent() {
-  const ws = new WebSocket('ws://localhost:8080');
+export const connect = () => {
+  ws = new WebSocket('ws://localhost:8080');
+  ws.onmessage = (event) => console.log('Message:', event.data);
+};
 
-  ws.onmessage = (event) => {
-    console.log('Message:', event.data);
-  };
-
-  const el = html`<div>Connected</div>` as HTMLElement;
-
-  // Cleanup: fechar conexão
-  addCleanup(el, () => {
-    ws.close();
-  });
-
-  return el;
-}
+export const disconnect = () => {
+  ws?.close();
+  ws = null;
+};
 ```
 
 ## Performance Best Practices

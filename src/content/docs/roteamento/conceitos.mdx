@@ -280,9 +280,10 @@ router.go(1)  // avança 1 página
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
-function LoginForm({ router }) {
-  const credentials = createState({ email: '', password: '' })
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const credentials = createState({ email: '', password: '' })
 
+function LoginForm({ router }) {
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
 

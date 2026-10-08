@@ -58,24 +58,18 @@ Sempre remova watchers quando não precisar mais deles:
 ```typescript
 import { createState } from '@_bashell/slash'
 
-const Component = () => {
-  const state = createState(0)
+const state = createState(0)
 
-  // ❌ Memory leak: watcher nunca é removido
-  state.watch(() => {
-    console.log('State changed')
-  })
+// ❌ Memory leak: se isto estiver no corpo de um componente, cada render cria um watcher novo
+// const Component = () => { state.watch(() => console.log('State changed')); ... }
 
-  // ✅ Correto: guarde e remova o watcher
-  const unwatch = state.watch(() => {
-    console.log('State changed')
-  })
+// ✅ Correto: crie o watcher uma vez, fora do componente, e guarde o unwatch
+const unwatch = state.watch(() => {
+  console.log('State changed')
+})
 
-  // Cleanup quando componente for destruído
-  return () => {
-    unwatch()
-  }
-}
+// Quando não precisar mais:
+unwatch()
 ```
 
 ### Event Listeners
