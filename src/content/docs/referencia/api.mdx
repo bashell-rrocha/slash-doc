@@ -330,8 +330,10 @@ const page = `<div id="app">${html}</div>
 <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>`
 ```
 
+`html` é sempre uma `string`. Monte o documento (`<!DOCTYPE>`, `<head>`, scripts) com um template literal comum; o que você colocar nele à mão (um título, por exemplo) precisa ser escapado por você.
+
 <Aside type="caution">
-No SSR, uma string (filho comum ou retornada por um reativo) que começa com `<` é tratada como HTML pronto e emitida **sem escape**. Isso vale inclusive para `${state.get()}`: se o valor vier de um usuário e começar com `<`, ele vira HTML. Escape o dado antes (a saída de `htmlString` é segura).
+No SSR toda string é escapada, inclusive `${state.get()}` e strings devolvidas por componentes. Marcação confiável exige `unsafeHtml(...)`. Veja [Segurança](/fundamentos/seguranca/).
 </Aside>
 
 ---
@@ -375,10 +377,10 @@ response.end()
 
 ### `htmlString`
 
-Template tag que renderiza para uma string HTML no servidor. Valores de texto interpolados são escapados, exceto strings que começam com `<`, tratadas como HTML pronto (veja a regra de confiança em SSR).
+Template tag que renderiza HTML no servidor e devolve um `SafeHtml`. **Toda** string interpolada é escapada. Templates `htmlString` aninhados, componentes e listas de templates (`items.map(...)`) entram no pai sem escape duplo porque são `SafeHtml`.
 
 ```typescript
-const htmlString: (strings: TemplateStringsArray, ...values: unknown[]) => string
+const htmlString: (strings: TemplateStringsArray, ...values: unknown[]) => SafeHtml
 ```
 
 **Uso:**
@@ -387,12 +389,73 @@ import { htmlString } from '@_bashell/slash/ssr'
 
 const title = 'My Page <script>'
 const page = htmlString`<h1>${title}</h1>`
+String(page)
 // <h1>My Page &lt;script&gt;</h1>
 ```
 
+Use `String(page)` (ou `renderToString(() => page).html`) quando precisar de uma `string`. Strings dinâmicas dentro de `<script>`/`<style>` também são escapadas; para JSON use `unsafeHtml(serializeStateForScript(dados))`. Um `<` literal dentro de um `<script>` estático do template é lido como tag (limitação do htm): coloque esse código em `unsafeHtml(...)`.
+
+---
+
+### `unsafeHtml()`
+
+Marca uma string como **marcação confiável**, para ser emitida como HTML sem escape. Funciona em `html` (cliente) e em `htmlString` (servidor).
+
+```typescript
+function unsafeHtml(html: string): SafeHtml
+```
+
+```typescript
+import { html, unsafeHtml } from '@_bashell/slash/core'
+
+html`<button>${unsafeHtml('<svg viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>')} Salvar</button>`
+```
+
 <Aside type="caution">
-O escape não se aplica a strings que começam com `<`: elas são tratadas como HTML já renderizado (é assim que o resultado de um `htmlString` aninhado entra no pai). Nunca devolva texto de usuário que comece com `<` sem escapá-lo.
+`unsafeHtml` **não sanitiza**. Significa "eu garanto este valor". Nunca passe entrada de usuário por ele; se o conteúdo vem de usuários (Markdown, CMS), passe antes por um sanitizador de verdade. Também é a saída para `srcdoc` (`srcdoc=${unsafeHtml(...)}`). Exportado de `@_bashell/slash/core` e `@_bashell/slash/ssr`.
 </Aside>
+
+---
+
+### `isSafeHtml()` e `SafeHtml`
+
+```typescript
+function isSafeHtml(x: unknown): x is SafeHtml
+```
+
+`SafeHtml` é o tipo devolvido por `htmlString` e `unsafeHtml`; `toString()` devolve a marcação. `isSafeHtml` não pode ser enganado por JSON vindo da rede (a marca é uma propriedade própria com `Symbol.for`). Um `SafeHtml` guardado em estado reativo perde a marca ao ser serializado para hidratação e volta como texto; reembrulhe com `unsafeHtml` no cliente.
+
+---
+
+### `unsafeUrl()`
+
+Marca uma URL **confiável** cujo esquema a política de URLs bloqueia (por exemplo `myapp://abrir/42`).
+
+```typescript
+function unsafeUrl(url: string): SafeUrl
+```
+
+```typescript
+import { html, unsafeUrl } from '@_bashell/slash/core'
+
+html`<a href=${unsafeUrl('myapp://abrir/42')}>Abrir no app</a>`
+```
+
+<Aside type="caution">
+`unsafeUrl` **não sanitiza** e só tem efeito em atributos de URL (`href`, `src`, `action`...) e no `content` de `<meta http-equiv="refresh">`; em qualquer outro atributo o valor é tratado como string comum. Nunca passe URL vinda de usuário.
+</Aside>
+
+---
+
+### `isSafeUrl()` e `SafeUrl`
+
+```typescript
+function isSafeUrl(x: unknown): x is SafeUrl
+```
+
+`SafeUrl` é o tipo devolvido por `unsafeUrl`. Assim como no `SafeHtml`, a marca não é forjável por JSON e se perde ao serializar estado para hidratação (a URL volta a ser sanitizada).
+
+Veja a política completa de URLs em [Segurança](/fundamentos/seguranca/).
 
 ---
 
@@ -604,7 +667,14 @@ Renderiza um `<a href>` cujo clique é interceptado e chama `router.push()`. Pro
 html`<${Link} to="/about" router=${router} class="nav-link">About<//>`
 ```
 
-**Props:** `to: string`, `router: RouterInstance` (obrigatório) e `children`.
+**Props:** `to: string`, `router: RouterInstance` (obrigatório), `external?: boolean` e `children`.
+
+`to` precisa ser um caminho do app (`/x`, `?q` ou `#h`). Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) não navega: o clique recebe `preventDefault` e o `href` vira `about:blank#blocked`. Para um site externo, use `external`: só libera `http(s)`, `mailto:` e `tel:` e adiciona `rel="noopener noreferrer"`.
+
+```typescript
+html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
+// <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
+```
 
 ---
 
@@ -761,7 +831,7 @@ Importados de `@_bashell/slash` (ou de `@_bashell/slash/forms`). Não existe um 
 | `getText(e)`, `getChecked(e)`, `getSelectValue(e)` | Leem o valor de eventos tipados |
 | `onSubmit(cb)` | `preventDefault()` e entrega os dados do `<form>` como objeto |
 | `onReset(handler)`, `onButtonClick(handler)` | Handlers tipados |
-| `formToObject(form)` | Converte um `<form>` em objeto (campos repetidos viram arrays) |
+| `formToObject(form)` | Converte um `<form>` em objeto sem protótipo (`Object.create(null)`; campos repetidos viram arrays). Use `Object.hasOwn(obj, 'campo')` em vez de `obj.hasOwnProperty(...)` |
 | `delegate(root, type, selector, handler)` | Delegação de eventos; retorna função para remover o listener |
 
 **Exemplo:**
@@ -868,6 +938,7 @@ Tipos válidos para children de elementos.
 type Child =
   | Node
   | string
+  | SafeHtml
   | number
   | boolean
   | null

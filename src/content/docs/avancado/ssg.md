@@ -22,7 +22,7 @@ interface Route<P extends Params = Params> {
   path: string;                                      // "/", "/sobre", "/posts/:slug", "/404"
   paths?: () => P[] | Promise<P[]>;                  // obrigatório se path tem ":param"
   head: Head | ((params: P) => Head | Promise<Head>);
-  page: (params: P) => string | Promise<string>;     // retorna HTML (htmlString)
+  page: (params: P) => SafeHtml | Promise<SafeHtml>; // retorna HTML seguro (view`...`)
 }
 ```
 
@@ -55,13 +55,25 @@ Cada rota gera `dist/<path>/index.html` (a rota `/` gera `dist/index.html`) e `/
 As páginas são funções que retornam HTML. Use o `view` de `src/lib/renderer.ts` (`htmlString` no build, `html` no navegador):
 
 ```typescript
+import type { SafeHtml } from "@_bashell/slash/ssr";
 import { layout } from "../components/layout";
 import { view } from "../lib/renderer";
 
-export function about(): string {
+export function about(): SafeHtml {
   return layout(view`<h1>Sobre</h1><p>Site gerado com Slash.</p>`);
 }
 ```
+
+## HTML seguro
+
+Páginas, layouts e ilhas retornam ``view`...` ``, que produz `SafeHtml`. Tudo o que você interpola (textos, props, valores de dados) é sempre escapado, então é seguro passar qualquer valor. Um `SafeHtml` aninhado (outro ``view`...` ``, `island()`, `Picture()`) entra como está.
+
+- Retornar uma string comum de uma página falha o build.
+- `unsafeHtml("...")` serve só para HTML confiável (por exemplo, HTML que você mesmo gerou e sanitizou). Nunca passe entrada de usuário. `head.extra` também exige `unsafeHtml(...)`.
+- `unsafeUrl("...")` é para URLs excepcionais que a política do core bloqueia.
+- Um `<` literal dentro de um `<script>` estático do template exige `unsafeHtml` (limitação do htm).
+
+Veja [Segurança](/fundamentos/seguranca/).
 
 ## Head
 
@@ -76,7 +88,7 @@ interface Head {
   canonical?: string;  // default: site.baseUrl + url
   noindex?: boolean;   // default: false; true também remove do sitemap
   jsonLd?: object | object[];
-  extra?: string;      // HTML adicional no <head> (escape é do autor)
+  extra?: SafeHtml;    // HTML adicional no <head>; precisa de unsafeHtml(...) (texto comum é escapado)
 }
 ```
 
@@ -223,7 +235,7 @@ A porta padrão é 4000; mude com `PORT=4100 bun run dev` (vale também para `pr
 ## Criar um projeto derivado
 
 1. Copie a pasta do template sem `.git/`, `docs/`, `node_modules/`, `dist/` e `.slash-cache/`.
-2. No `package.json`, troque `@_bashell/slash` de `workspace:*` para a versão do npm: `"@_bashell/slash": "^0.0.2"`.
+2. No `package.json`, troque `@_bashell/slash` de `workspace:*` para a versão do npm: `"@_bashell/slash": "^0.0.3"`.
 3. Remova o alias `paths` (que aponta para `../slash/src`) do `tsconfig.json`.
 4. Ajuste `src/site.ts` e `src/routes.ts` e rode `bun install && bun run dev`.
 5. Para os testes E2E, instale o navegador do Playwright uma vez: `bunx playwright install chromium`.

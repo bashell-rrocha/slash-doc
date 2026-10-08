@@ -50,6 +50,36 @@ Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bi
 
 ---
 
+## Migrando para 0.0.3
+
+A 0.0.3 torna o core **seguro por padrão**. Uma string é sempre texto, URLs e handlers são verificados e marcação confiável precisa de um tipo explícito. Isso traz mudanças incompatíveis: use a tabela abaixo para achar e corrigir cada caso. A explicação completa está em [Segurança](/fundamentos/seguranca/).
+
+| Se o seu código... | O que acontece agora | Como migrar |
+| --- | --- | --- |
+| usa ``htmlString`...` `` como `string` (`.length`, `+`, `.startsWith`, `res.send(x)`) | ele devolve um `SafeHtml` | use `String(x)` ou `renderToString(() => x).html` |
+| devolve HTML montado à mão de um componente ou helper (`return "<div>...</div>"`, Markdown, ícones) | a string aparece como texto visível | devolva um template `htmlString`/`html`; para marcação confiável use `unsafeHtml(str)` |
+| usa o helper `text()` ou o espaço inicial para escapar strings que começam com `<` | não é mais necessário, toda string já é escapada | apague o helper e interpole direto |
+| passa `innerHTML=${...}`, `outerHTML=...` ou `srcdoc=${...}` como prop | a prop é ignorada (aviso em dev) | use `unsafeHtml(...)` como filho; `srcdoc=${unsafeHtml(...)}` |
+| usa `javascript:`, `data:text/html`, `blob:` ou esquemas próprios em `href`/`src`/`action` | o valor vira `about:blank#blocked` | use uma URL real, ou `unsafeUrl(url)` para uma URL confiável |
+| usa `<${Link} to="./x">`, `to="../x"`, `to="about"` ou uma URL absoluta | não navega, `href` bloqueado | use um caminho do app (`/x`, `?q`, `#h`); para site externo, adicione `external` |
+| usa handlers em string (`onclick="..."`) ou um atributo comum que comece com `on` | toda prop `on*` que não seja função, objeto handler ou `[fn, opções]` é descartada (cliente e SSR) | passe uma função: `onClick=${fn}`; use `data-` nos atributos comuns |
+| escreve `<script>${json}</script>` ou `<style>${css}</style>` com valores dinâmicos no `htmlString` | strings dinâmicas são escapadas (aviso em dev) | `unsafeHtml(serializeStateForScript(dados))` para JSON; mantenha CSS/JS estáticos |
+| coloca um `<` literal num `<script>` estático dentro do `htmlString` (`if (a < b)`) | o htm lê como tag | mova esse código para `unsafeHtml(...)` |
+| interpola um `State` direto no SSR (`${state}`) | um `State` não é reativo no servidor | interpole `state.get()` |
+| embute estado com `JSON.stringify(state)` num `<script>` | quebra com `</script>` | `serializeStateForScript(state)` |
+| chama `__addBatchEndCallback`, `__removeBatchEndCallback` ou `__recordBatchUpdate` | removidos | use `batch()` e `state.watch()` |
+| monta um `RouterInstance` à mão (mock) | `ready` é obrigatório | adicione `ready: Promise.resolve()` |
+| chama `data.hasOwnProperty(...)` em `formToObject()` ou `router.query` | esses objetos não têm protótipo | `Object.hasOwn(data, "campo")` |
+| usava strings `style="..."` no cliente aplicadas como vieram | declarações inseguras são descartadas | use só valores CSS simples (escapes só dentro de aspas) |
+
+Buscas rápidas para achar os casos no seu projeto:
+
+```bash
+grep -rnE "htmlString|innerHTML=|srcdoc=|href=\$\{|onclick=|JSON.stringify\(state" src
+```
+
+---
+
 ## Migrando de React
 
 ### Mapeamento de Conceitos
@@ -64,6 +94,7 @@ Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bi
 | `useContext()` / `useState()` | Estado fora do componente | `createState()` no módulo; não há estado local por instância |
 | `props` | Parâmetros de função | Idêntico |
 | JSX | `html` template tag | Ver exemplos |
+| `dangerouslySetInnerHTML` | `unsafeHtml(...)` como filho | `innerHTML` é bloqueado como prop; `unsafeHtml` não sanitiza (veja [Segurança](/fundamentos/seguranca/)) |
 
 ### Exemplo Prático de Migração
 
@@ -312,6 +343,7 @@ function ReactWrapper() {
 | `onMounted()` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
 | `onUnmounted()` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 | Template | `html` tag | HTM syntax |
+| `v-html` | `unsafeHtml(...)` como filho | Só para marcação confiável e sanitizada |
 
 ### Exemplo de Migração
 
