@@ -5,6 +5,7 @@ import starlightThemeCatppuccin from 'starlight-theme-catppuccin';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://slash.bashell.com.br',
 	integrations: [
 		starlight({
 			title: 'Slash Documentation',

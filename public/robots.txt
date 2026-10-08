@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://slash.bashell.com.br/sitemap-index.xml
