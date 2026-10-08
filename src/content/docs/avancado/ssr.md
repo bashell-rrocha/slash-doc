@@ -146,11 +146,13 @@ htmlString`<p>${comment.get()}</p>`
 ```
 
 Nunca interpole dado de usuário que possa começar com `<` sem escapá-lo antes (a saída de `htmlString` é segura).
+
+Nuance: o que é lido como **primitivo** de `state.get()` (como acima, onde o state guarda uma string) sai cru se começar com `<`. Já uma string lida de uma **propriedade de objeto** (`user.get().bio`) é escapada e recebe marcadores `<!--reactive-start:id-->`, então não vira HTML. Não dependa dessa diferença: continue escapando dado de usuário antes de interpolar.
 :::
 
 ### Estado no SSR
 
-Um `State` **não é reativo** no SSR: interpolar o próprio state (`${count}`) não gera marcador nem entra no `state` retornado. Interpole o valor com `count.get()` dentro do componente.
+Um `State` **não é reativo** no SSR: interpolar o próprio state (`${count}`) não gera marcador nem entra no `state` retornado. Pior: o objeto `State` vira o texto `[Object]` no HTML (`<p>[Object]</p>`) e o Slash escreve um aviso no console ("Unexpected object in child position"). Interpole o valor com `count.get()` dentro do componente.
 
 Já os reativos com `get()` + `subscribe()` (como o `Router`) são renderizados entre marcadores `<!--reactive-start:id-->`, como filhos comuns, e o valor deles **não** é gravado em `state`.
 
@@ -206,34 +208,39 @@ async function* renderToStream(
 ): AsyncGenerator<string, void, unknown>
 ```
 
-### Benefícios do Streaming
+### O que o streaming faz (e não faz)
 
-1. **TTFB Melhorado**: Primeiro byte chega mais rápido
-2. **Renderização Progressiva**: Navegador começa a renderizar antes do HTML completo
-3. **Melhor Performance**: Chunks de 16KB otimizados
-4. **Menor Memory Usage**: Processa em partes
+`renderToStream()` renderiza **toda** a árvore para uma string antes de emitir o primeiro chunk e só então a divide em pedaços de 16 KB. Portanto ele **não** reduz o tempo até o primeiro byte nem renderiza progressivamente no servidor; o que ele oferece é enviar a resposta em partes (sem montar uma string final de resposta) e anexar o script de estado no final. Para páginas pequenas, `renderToString()` é mais simples e equivalente.
 
 ### Exemplo com Bun
 
 ```typescript
 import { renderToStream, htmlString } from '@_bashell/slash'
 
+// Só o conteúdo da aplicação é renderizado pelo Slash
 const App = () => htmlString`
-  <!DOCTYPE html>
-  <html>
-    <head>
-      <title>Streaming SSR</title>
-    </head>
-    <body>
-      <div id="app">
-        <h1>Conteúdo grande...</h1>
-        ${Array.from({ length: 100 }).map((_, i) =>
-          htmlString`<p>Parágrafo ${i}</p>`
-        )}
-      </div>
-    </body>
-  </html>
+  <div>
+    <h1>Conteúdo grande...</h1>
+    ${Array.from({ length: 100 }).map((_, i) =>
+      htmlString`<p>Parágrafo ${i}</p>`
+    )}
+  </div>
 `
+
+// O shell do documento é texto comum (não use htmlString com <!DOCTYPE>)
+const head = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Streaming SSR</title>
+  </head>
+  <body>
+    <div id="app">`
+// renderToStream emite o script __SLASH_STATE__ logo depois do HTML da app,
+// por isso fechamos o #app no `tail`
+const tail = `</div>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`
 
 // Servidor Bun
 Bun.serve({
@@ -241,9 +248,12 @@ Bun.serve({
   async fetch(req) {
     const stream = new ReadableStream({
       async start(controller) {
+        const encoder = new TextEncoder()
+        controller.enqueue(encoder.encode(head))
         for await (const chunk of renderToStream(App)) {
-          controller.enqueue(new TextEncoder().encode(chunk))
+          controller.enqueue(encoder.encode(chunk))
         }
+        controller.enqueue(encoder.encode(tail))
         controller.close()
       }
     })
@@ -519,22 +529,20 @@ const app = new Hono()
 
 app.get('/', (c) => {
   const App = () => htmlString`
-    <!DOCTYPE html>
-    <html>
-      <body>
-        <div id="app">
-          <h1>Hello from Hono + Slash SSR!</h1>
-        </div>
-        <script src="/client.js"></script>
-      </body>
-    </html>
+    <h1>Hello from Hono + Slash SSR!</h1>
   `
 
   const { html, state } = renderToString(App)
 
-  return c.html(html + `
+  // O documento é um template literal comum; o app entra em #app
+  return c.html(`<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app">${html}</div>
     <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-  `)
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`)
 })
 
 export default app
@@ -576,7 +584,8 @@ app.listen(3000)
 
 - ✅ Use `htmlString` (não `html`) nos componentes do servidor
 - ✅ Use `renderToString()` para SSR síncrono
-- ✅ Use `renderToStream()` para streaming SSR (melhor performance)
+- ✅ Use `renderToStream()` se quiser enviar a resposta em partes (a renderização em si continua completa antes do primeiro chunk)
+- ✅ Monte o documento (`<!DOCTYPE html>`, `<head>`, scripts) com template literal comum, nunca com `htmlString`
 - ✅ Serialize o estado com `serializeStateForScript` (nunca `JSON.stringify` cru dentro de `<script>`) e injete no HTML
 - ✅ `State` não é reativo no SSR: interpole `state.get()`
 - ✅ `Router` funciona no SSR (use `initialPath`)

@@ -292,40 +292,61 @@ const loadUserData = (userId: number) => {
   })
 }
 
+// Binding reativo { get, subscribe }: o atributo `value` acompanha o state
+// sem recriar o <input> (e sem perder o foco)
+function field<K extends keyof FormData>(key: K) {
+  return {
+    get: () => form.get()[key],
+    subscribe: (fn: (value: FormData[K]) => void) => form.watch((s) => fn(s[key])),
+  }
+}
+
+// Componente pequeno: só ele re-renderiza quando o form muda
+const Summary = () => html`
+  <p>${form.get().name} / ${form.get().email} / ${form.get().age}</p>
+`
+
+// O formulário em si não lê `form.get()` diretamente
 const FormComponent = () => html`
   <form>
     <input
       type="text"
       placeholder="Name"
-      value=${form.get().name}
-      onChange=${(e: Event) =>
+      value=${field('name')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), name: (e.target as HTMLInputElement).value })
       }
     />
     <input
       type="email"
       placeholder="Email"
-      value=${form.get().email}
-      onChange=${(e: Event) =>
+      value=${field('email')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })
       }
     />
     <input
       type="number"
       placeholder="Age"
-      value=${form.get().age}
-      onChange=${(e: Event) =>
+      value=${field('age')}
+      onInput=${(e: Event) =>
         form.set({ ...form.get(), age: Number((e.target as HTMLInputElement).value) })
       }
     />
     <button type="button" onClick=${resetForm}>Reset</button>
     <button type="button" onClick=${() => loadUserData(1)}>Load User</button>
+    <${Summary} />
   </form>
 `
 
-// O form lê `form` no render, então re-renderiza a cada set (por isso onChange, não onInput)
-render(html`<${FormComponent} />`, '#app')
+// Chamada direta: o form não vira dependência do state, então os inputs
+// mantêm o foco ao digitar. Reset e Load atualizam os campos via binding.
+render(FormComponent(), '#app')
 ```
+
+:::note
+`batch` garante que Reset e Load notifiquem uma única vez, com o valor final. O padrão de campos sem re-render do formulário é explicado em [Formulários](/formularios/conceitos/).
+:::
 
 ### Exemplo 2: Lista com Filtros
 
@@ -392,6 +413,17 @@ const setFilter = (newFilter: 'all' | 'active' | 'completed') => {
   })
 }
 
+// A lista fica em um componente próprio: só ele lê `filteredTodos`
+const TodoList = () => html`
+  <ul>
+    ${filteredTodos.get().map(todo => html`
+      <li>${todo.text}</li>
+    `)}
+  </ul>
+`
+
+// TodoApp não lê nenhum state no render, então o <input> de busca
+// nunca é recriado e não perde o foco enquanto o usuário digita
 const TodoApp = () => html`
   <div>
     <input
@@ -404,11 +436,7 @@ const TodoApp = () => html`
       <button onClick=${() => setFilter('active')}>Active</button>
       <button onClick=${() => setFilter('completed')}>Completed</button>
     </div>
-    <ul>
-      ${filteredTodos.get().map(todo => html`
-        <li>${todo.text}</li>
-      `)}
-    </ul>
+    <${TodoList} />
   </div>
 `
 

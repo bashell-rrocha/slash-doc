@@ -466,12 +466,12 @@ invalidateLoader()       // todo o cache
 ### `serializeLoaderData()` e `deserializeLoaderData()`
 
 ```typescript
-function serializeLoaderData(data: Record<string, unknown>): string // JSON.stringify
+function serializeLoaderData(data: Record<string, unknown>): string // JSON.stringify + escape para <script>
 function deserializeLoaderData(serialized: string): Record<string, unknown> // {} se inválido
 ```
 
 <Aside type="caution">
-`serializeLoaderData` não escapa `<`, `>` nem `&`: não o use dentro de `<script>`. Use `serializeStateForScript`.
+`serializeLoaderData` escapa `<`, `>`, `&`, U+2028 e U+2029 (igual a `serializeStateForScript`), então é seguro dentro de `<script type="application/json">`. Um valor de nível superior que não seja JSON vira `"null"`.
 </Aside>
 
 ---

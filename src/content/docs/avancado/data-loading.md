@@ -302,8 +302,8 @@ const serialized = serializeLoaderData(loaderData)
 // '{"user:{\"id\":\"123\"}":{"id":123,"name":"John"},"posts:{}":[{"id":1,"title":"Post 1"}]}'
 ```
 
-:::caution[Não use dentro de `<script>`]
-`serializeLoaderData` é só `JSON.stringify`: ele **não escapa** `<`, `>` nem `&`. Um valor como `"</script><script>..."` fecha a tag e injeta código. Para embutir os dados no HTML use `serializeStateForScript` (de `@_bashell/slash/ssr`), que escapa esses caracteres e produz JSON que `deserializeLoaderData` lê normalmente.
+:::tip[Seguro para `<script>`]
+`serializeLoaderData` faz `JSON.stringify` e escapa `<`, `>`, `&`, U+2028 e U+2029 (o mesmo que `serializeStateForScript`), então o resultado pode ir dentro de `<script type="application/json">` sem fechar a tag. Um valor de nível superior que não seja JSON (por exemplo `undefined`) vira `"null"`. Use sempre `type="application/json"` na tag: o conteúdo é lido por `textContent` e `deserializeLoaderData`, nunca executado.
 :::
 
 ### `deserializeLoaderData()`
@@ -594,6 +594,15 @@ import {
 
 type Post = { id: string; title: string; content: string }
 
+// Escapa texto vindo de usuário antes de colocá-lo em HTML montado à mão
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
 const postsLoader = createLoader(
   async () => {
     const res = await fetch('https://api.example.com/posts')
@@ -621,29 +630,35 @@ async function renderBlogPage(postId: string) {
   const App = () => htmlString`
     <article>
       <h1>${post.title}</h1>
-      <div>${post.content}</div>
+      <div>${post.content /* HTML já sanitizado: ver aviso abaixo */}</div>
     </article>
   `
 
   const { html } = renderToString(App)
 
-  // Serializar dados
+  // Serializar dados (já escapado para uso dentro de <script>)
   const loaderData = serializeLoaderData({
     [`post:${JSON.stringify({ id: postId })}`]: post
   })
 
-  return `
-    <!DOCTYPE html>
-    <html>
-      <body>
-        ${html}
-        <script id="__LOADER_DATA__">${loaderData}</script>
-        <script src="/client.js" type="module"></script>
-      </body>
-    </html>
-  `
+  // O documento é montado com template literal comum (não com htmlString)
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <title>${escapeHtml(post.title)}</title>
+  </head>
+  <body>
+    <div id="app">${html}</div>
+    <script id="__LOADER_DATA__" type="application/json">${loaderData}</script>
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>`
 }
 ```
+
+:::caution[Texto de usuário no SSR]
+No SSR, uma string que começa com `<` é tratada como HTML pronto e sai sem escape. Por isso `post.content` só pode ser interpolado se for HTML que você já sanitizou; texto cru de usuário que comece com `<` seria injetado como marcação. Já `post.title` é escapado normalmente pelo `htmlString`, e no `<title>` montado à mão usamos `escapeHtml`.
+:::
 
 ### Cliente
 
