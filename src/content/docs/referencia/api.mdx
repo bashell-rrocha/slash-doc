@@ -398,114 +398,101 @@ O escape não se aplica a strings que começam com `<`: elas são tratadas como 
 
 ### `createLoader()`
 
-Cria um loader isomórfico para data fetching.
+Cria um loader isomórfico com cache no cliente. No servidor o loader sempre executa (sem cache).
 
 ```typescript
-function createLoader<T, Args extends any[] = []>(
-  fetchFn: (...args: Args) => T | Promise<T>,
-  options?: LoaderOptions
-): LoaderFunction<T, Args>
+function createLoader<T>(
+  fn: (ctx: LoaderContext) => T | Promise<T>,
+  options: LoaderOptions
+): (ctx: LoaderContext) => Promise<T>
 ```
 
-**Parâmetros:**
-- `fetchFn`: Função que carrega os dados
-- `options`: Configurações do loader
-
-**Opções:**
+**Contexto e opções:**
 ```typescript
-interface LoaderOptions {
-  ttl?: number                              // Tempo de vida do cache (ms)
-  key?: (...args: any[]) => string         // Função para gerar chave de cache
-  onError?: (error: Error) => void         // Callback de erro
-  staleWhileRevalidate?: boolean           // Retorna cache stale enquanto revalida
+type LoaderContext = {
+  params: Record<string, string>
+  request?: Request
+  isServer: boolean
+}
+
+type LoaderOptions = {
+  key: string          // identifica o loader no cache (obrigatório)
+  ttl?: number         // tempo de vida do cache em ms (padrão: 5 minutos)
+  revalidate?: boolean // ignora o cache e executa de novo
 }
 ```
 
-**Retorna:** Função loader que pode ser chamada para carregar dados
+A chave de cache no cliente é `` `${key}:${JSON.stringify(ctx.params)}` ``.
 
 **Exemplo:**
 ```typescript
 import { createLoader } from '@_bashell/slash'
 
-interface User {
-  id: string
-  name: string
-}
-
-const userLoader = createLoader<User>(
-  async (id: string) => {
-    const res = await fetch(`/api/users/${id}`)
+const userLoader = createLoader(
+  async ({ params }) => {
+    const res = await fetch(`/api/users/${params.id}`)
     return res.json()
   },
-  {
-    ttl: 5 * 60 * 1000, // 5 minutos
-    key: (id) => `user:${id}`
-  }
+  { key: 'user', ttl: 5 * 60 * 1000 }
 )
 
-// Uso
-const user = userLoader('123') // Carrega e cacheia
-const sameUser = userLoader('123') // Retorna do cache
+// Uso (assíncrono)
+const user = await userLoader({ params: { id: '123' }, isServer: false }) // carrega e cacheia
+const same = await userLoader({ params: { id: '123' }, isServer: false }) // vem do cache
 ```
 
 ---
 
 ### `invalidateLoader()`
 
-Invalida o cache de um loader.
+Limpa o cache de loaders no cliente.
 
 ```typescript
-function invalidateLoader<T, Args extends any[]>(
-  loader: LoaderFunction<T, Args>,
-  ...args: Args
-): void
+function invalidateLoader(key?: string): void
 ```
 
 **Parâmetros:**
-- `loader`: Loader para invalidar
-- `args`: Argumentos para gerar a chave (opcional)
+- `key`: `key` do loader cujas entradas serão removidas (opcional). Sem argumento, limpa todo o cache.
 
-**Exemplo:**
 ```typescript
 import { invalidateLoader } from '@_bashell/slash'
 
-// Invalida cache específico
-invalidateLoader(userLoader, '123')
-
-// Invalida todo o cache do loader
-invalidateLoader(userLoader)
+invalidateLoader('user') // todas as entradas do loader com key 'user'
+invalidateLoader()       // todo o cache
 ```
+
+---
+
+### `serializeLoaderData()` e `deserializeLoaderData()`
+
+```typescript
+function serializeLoaderData(data: Record<string, unknown>): string // JSON.stringify
+function deserializeLoaderData(serialized: string): Record<string, unknown> // {} se inválido
+```
+
+<Aside type="caution">
+`serializeLoaderData` não escapa `<`, `>` nem `&`: não o use dentro de `<script>`. Use `serializeStateForScript`.
+</Aside>
 
 ---
 
 ### `hydrateLoaderCache()`
 
-Obtém o cache de loaders para hidratação no cliente.
+Injeta no cache do cliente dados que vieram do servidor.
 
 ```typescript
-function hydrateLoaderCache(): Record<string, any>
+function hydrateLoaderCache(data: Record<string, unknown>): void
 ```
 
-**Retorna:** Objeto com cache de todos os loaders
-
-**Exemplo (Servidor):**
+**Exemplo (Cliente):**
 ```typescript
-import { hydrateLoaderCache } from '@_bashell/slash'
+import { hydrateLoaderCache, deserializeLoaderData } from '@_bashell/slash'
 
-const cache = hydrateLoaderCache()
-
-const html = htmlString`
-  <!DOCTYPE html>
-  <html>
-    <head>
-      <script>
-        window.__LOADER_CACHE__ = ${JSON.stringify(cache)};
-      </script>
-    </head>
-    <body>...</body>
-  </html>
-`
+const serialized = document.getElementById('__LOADER_DATA__')?.textContent || '{}'
+hydrateLoaderCache(deserializeLoaderData(serialized))
 ```
+
+**Exemplo (Servidor):** veja [Data Loading](/avancado/data-loading/).
 
 ---
 

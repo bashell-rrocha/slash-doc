@@ -302,6 +302,10 @@ const serialized = serializeLoaderData(loaderData)
 // '{"user:{\"id\":\"123\"}":{"id":123,"name":"John"},"posts:{}":[{"id":1,"title":"Post 1"}]}'
 ```
 
+:::caution[Não use dentro de `<script>`]
+`serializeLoaderData` é só `JSON.stringify`: ele **não escapa** `<`, `>` nem `&`. Um valor como `"</script><script>..."` fecha a tag e injeta código. Para embutir os dados no HTML use `serializeStateForScript` (de `@_bashell/slash/ssr`), que escapa esses caracteres e produz JSON que `deserializeLoaderData` lê normalmente.
+:::
+
 ### `deserializeLoaderData()`
 
 Deserializa dados no cliente:
@@ -354,7 +358,7 @@ import {
   renderToString,
   htmlString,
   createLoader,
-  serializeLoaderData
+  serializeStateForScript
 } from '@_bashell/slash'
 
 // Criar loader
@@ -384,8 +388,8 @@ async function renderPage(userId: string) {
 
   const { html } = renderToString(App)
 
-  // Serializar dados do loader
-  const loaderData = serializeLoaderData({
+  // Serializar dados do loader (com escape seguro para <script>)
+  const loaderData = serializeStateForScript({
     [`user:${JSON.stringify({ id: userId })}`]: user
   })
 
@@ -395,9 +399,7 @@ async function renderPage(userId: string) {
     <html>
       <body>
         ${html}
-        <script id="__LOADER_DATA__" type="application/json">
-        ${loaderData}
-        </script>
+        <script id="__LOADER_DATA__" type="application/json">${loaderData}</script>
         <script src="/client.js" type="module"></script>
       </body>
     </html>

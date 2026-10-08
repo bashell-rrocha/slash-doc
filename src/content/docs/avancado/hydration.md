@@ -1,588 +1,132 @@
 ---
 title: Hydration
-description: Reconectando estado reativo no cliente após SSR
+description: Como o cliente assume a página renderizada no servidor
 ---
 
-**Hydration** é o processo de "reanimar" o HTML estático renderizado no servidor, reconectando os estados reativos e event handlers no navegador.
+import { Aside } from '@astrojs/starlight/components';
 
-## O que é Hydration?
+Esta página descreve o que a versão atual do Slash faz de fato na hidratação. Ela é mais simples do que "reconectar o DOM existente": o cliente **recria** a interface por cima do HTML do servidor.
 
-Quando você usa [SSR](/avancado/ssr), o servidor envia HTML completo para o navegador. Mas esse HTML é "estático" - não tem reatividade nem event handlers funcionando. A hidratação resolve isso:
+## O fluxo
 
-1. O navegador recebe HTML do servidor
-2. O HTML é exibido imediatamente (rápido!)
-3. JavaScript carrega e "hidrata" o DOM existente
-4. Estados reativos são reconectados
-5. Event handlers começam a funcionar
-6. A aplicação fica totalmente interativa
+1. O servidor renderiza com `renderToString()` e envia o HTML mais um `<script id="__SLASH_STATE__" type="application/json">`.
+2. O navegador mostra o HTML imediatamente, antes de o JavaScript carregar.
+3. No cliente, `render(view, container)` percebe que o container **já tem conteúdo** e que existe o script `__SLASH_STATE__`.
+4. Nesse caso `render()` lê o JSON do script, **remove o script**, **limpa o container** e renderiza a view do zero no cliente.
 
-### Benefícios da Hydration
-
-- ✅ **Performance**: Conteúdo visível antes do JS carregar
-- ✅ **SEO**: Crawlers veem HTML completo
-- ✅ **UX Progressiva**: Funciona mesmo com JS desabilitado (conteúdo básico)
-- ✅ **Eficiência**: Reutiliza DOM existente (não recria tudo)
-
-## Como Funciona no Slash
-
-O Slash usa **marcadores especiais** no HTML para identificar partes reativas:
-
-### 1. Marcadores de Texto Reativo
-
-```html
-<!-- HTML renderizado no servidor -->
-<div>
-  Contador: <!--reactive-start:s0-->42<!--reactive-end:s0-->
-</div>
-```
-
-Os comentários `<!--reactive-start:s0-->` e `<!--reactive-end:s0-->` marcam onde o estado reativo `s0` está sendo usado.
-
-### 2. Marcadores de Atributos Reativos
-
-```html
-<!-- HTML renderizado no servidor -->
-<button class="active" data-reactive-class="s0">Click</button>
-<input value="John" data-reactive-value="s1" />
-<input type="checkbox" checked data-reactive-checked="s2" />
-```
-
-Os atributos `data-reactive-*` indicam que esses atributos devem ser reconectados aos estados reativos.
-
-### 3. Estado Serializado
-
-O servidor injeta o estado inicial no HTML:
-
-```html
-<script id="__SLASH_STATE__" type="application/json">
-{"s0":42,"s1":"John","s2":true}
-</script>
-```
-
-## Funções de Hydration
-
-### `hydrateReactiveAttributes()`
-
-Hidrata atributos reativos de um elemento específico.
-
-```typescript
-import { hydrateReactiveAttributes, createState } from '@_bashell/slash'
-
-// Recuperar estados serializados
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-// Recriar states a partir dos dados
-const reactives = new Map()
-reactives.set('s0', createState({ value: stateData.s0 }))
-
-// Hidratar elemento
-const button = document.querySelector('button')
-hydrateReactiveAttributes(button, reactives)
-```
-
-### `hydrateReactiveNodes()`
-
-Hidrata nós de texto reativos (marcados com comentários):
-
-```typescript
-import { hydrateReactiveNodes, createState } from '@_bashell/slash'
-
-// Recuperar estados
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-const reactives = new Map()
-reactives.set('s0', createState({ value: stateData.s0 }))
-
-// Hidratar todos os nós de texto reativos no container
-const container = document.getElementById('app')
-hydrateReactiveNodes(container, reactives)
-```
-
-### `walkAndHydrateReactiveAttributes()`
-
-Percorre recursivamente a árvore DOM e hidrata todos os atributos reativos:
-
-```typescript
-import { walkAndHydrateReactiveAttributes, createState } from '@_bashell/slash'
-
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-const reactives = new Map()
-reactives.set('s0', createState({ value: stateData.s0 }))
-
-const root = document.getElementById('app')
-walkAndHydrateReactiveAttributes(root, reactives)
-```
-
-## Exemplo Completo de Hydration
-
-### Servidor (SSR)
-
-```typescript
-// server.ts
-import { renderToString, htmlString, createState, serializeStateForScript } from '@_bashell/slash'
-
-const Counter = () => {
-  const count = createState({ value: 0 })
-  const { value } = count.get()
-
-  return htmlString`
-    <div id="app">
-      <h1>Contador: ${value}</h1>
-      <button class="increment">+1</button>
-    </div>
-  `
-}
-
-const { html, state } = renderToString(Counter)
-
-const fullHtml = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>SSR + Hydration</title>
-  </head>
-  <body>
-    ${html}
-    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-    <script src="/client.js" type="module"></script>
-  </body>
-</html>
-`
-
-// Enviar fullHtml para o navegador
-```
-
-### Cliente (Hydration)
+Não há uma função `hydrate()` separada: o mesmo `render()` serve para os dois casos.
 
 ```typescript
 // client.ts
-import {
-  createState,
-  hydrateReactiveNodes,
-  walkAndHydrateReactiveAttributes
-} from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
+import { App } from './App'
 
-// 1. Recuperar estado serializado
-const stateScript = document.getElementById('__SLASH_STATE__')
-const stateData = JSON.parse(stateScript?.textContent || '{}')
-
-// 2. Recriar estados reativos
-const count = createState({ value: stateData.s0 || 0 })
-
-// 3. Mapear IDs para states
-const reactives = new Map()
-reactives.set('s0', count)
-
-// 4. Hidratar nós de texto reativos
-const app = document.getElementById('app')
-if (app) {
-  hydrateReactiveNodes(app, reactives)
-  walkAndHydrateReactiveAttributes(app, reactives)
-}
-
-// 5. Adicionar event handlers (não são serializados no SSR)
-const button = document.querySelector('.increment')
-button?.addEventListener('click', () => {
-  count.set({ value: count.get().value + 1 })
-})
+// Há HTML do servidor em #app e o script __SLASH_STATE__ na página:
+// o container é limpo e a view é renderizada no cliente
+render(html`<${App} />`, '#app')
 ```
 
-## Context de Hydration
+<Aside type="caution">
+O DOM do servidor **não é reaproveitado**: os nós são substituídos por nós novos criados no cliente. O ganho da hidratação aqui é mostrar conteúdo antes de o JS carregar e ter SEO; os event handlers só passam a existir depois de `render()` rodar. Sem o script `__SLASH_STATE__`, ou com o container vazio, `render()` apenas renderiza do zero.
+</Aside>
 
-Para casos mais avançados, você pode usar o **contexto de hidratação**:
+## O estado não é restaurado sozinho
 
-### `setHydrateContext()`
+`render()` lê o JSON do estado, mas **não o aplica** aos seus `State`. Os states do cliente começam com o valor inicial que você criar. Para o cliente começar com os mesmos dados do servidor, entregue os dados por um caminho que você controla, por exemplo:
 
-Define o contexto de hidratação para reutilizar DOM existente:
+- criar os states do cliente com os mesmos valores iniciais (dados fixos ou vindos de uma API);
+- ler o JSON antes de chamar `render()` (que remove o script) e passá-lo aos seus states;
+- usar o cache de loaders, descrito em [Data Loading](/avancado/data-loading/).
 
 ```typescript
-import { setHydrateContext, render, html } from '@_bashell/slash'
+import { html, render, createState } from '@_bashell/slash'
 
-// Definir contexto apontando para o DOM existente
-const root = document.getElementById('app')
-setHydrateContext({
-  cursor: root?.firstChild || null
-})
+// Ler ANTES de render(), que remove o script
+const script = document.getElementById('__SLASH_STATE__')
+const initial = script ? JSON.parse(script.textContent || '{}') : {}
 
-// Renderizar (vai reutilizar DOM existente)
-const App = () => html`
-  <div>
-    <h1>Hidratado!</h1>
-  </div>
+const count = createState({ value: (initial.s0 as number) ?? 0 })
+
+const Counter = () => html`
+  <button onClick=${() => count.set({ value: count.get().value + 1 })}>
+    ${count.get().value}
+  </button>
 `
 
-render(App, root)
-
-// Limpar contexto
-setHydrateContext(null)
+render(html`<${Counter} />`, '#app')
 ```
 
-### `getHydrateContext()`
+<Aside type="note">
+`initial.s0` é o id gerado no servidor para o valor lido (`s0`, `s1`, ...), na ordem em que a renderização o encontrou. Esse mapeamento é um detalhe de implementação e pode mudar; prefira um formato de dados seu quando precisar de estabilidade.
+</Aside>
 
-Obtém o contexto de hidratação atual:
+## O que o servidor emite
 
-```typescript
-import { getHydrateContext } from '@_bashell/slash'
+Os marcadores abaixo estão no HTML do servidor. Eles identificam regiões que dependem de valor lido durante a renderização, mas **o cliente atual não os usa** para reconectar nada: `render()` descarta esse HTML.
 
-const context = getHydrateContext()
-
-if (context) {
-  console.log('Estamos em modo de hidratação')
-  console.log('Cursor atual:', context.cursor)
-}
+```html
+<h2>Contador: <!--reactive-start:s0-->42<!--reactive-end:s0--></h2>
+<button class="active" data-reactive-class="s1">Click</button>
+<script id="__SLASH_STATE__" type="application/json">{"s0":42,"s1":"active"}</script>
 ```
 
-## Hydration com `hHydrate()`
+Reativos com `get()` + `subscribe()` (como o `Router`) também saem entre `<!--reactive-start:id-->` e `<!--reactive-end:id-->`, mas o valor deles não vai para o JSON. Um `State` não é reativo no SSR: interpole `state.get()`.
 
-A função `hHydrate()` é uma versão especial do `h()` que reutiliza DOM existente:
+## Servidor completo
 
-```typescript
-import { hHydrate, setHydrateContext } from '@_bashell/slash'
-
-// Configurar contexto
-const root = document.getElementById('app')
-setHydrateContext({ cursor: root?.firstChild || null })
-
-// Hidratar elementos
-const element = hHydrate('div', { class: 'container' },
-  hHydrate('h1', null, 'Título'),
-  hHydrate('p', null, 'Parágrafo')
-)
-
-// Limpar contexto
-setHydrateContext(null)
-```
-
-## Hydration Automática com `render()`
-
-Você pode simplificar o processo usando `render()` com hydration automática:
-
-### Servidor
+Use `serializeStateForScript` (de `@_bashell/slash/ssr`) para embutir o estado. Ele escapa `<`, `>`, `&`, U+2028 e U+2029, de modo que nenhum valor consegue fechar a tag `<script>`. Nunca use `JSON.stringify` cru dentro de `<script>`.
 
 ```typescript
-import { renderToString, htmlString } from '@_bashell/slash'
+// server.ts
+import { htmlString, renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { createState } from '@_bashell/slash/core'
+
+const count = createState({ value: 0 })
 
 const App = () => htmlString`
-  <div id="app">
-    <h1>My App</h1>
+  <div id="app-root">
+    <h1>Contador: ${count.get().value}</h1>
+    <button>+1</button>
   </div>
 `
 
 const { html, state } = renderToString(App)
 
-// Enviar html + state para o navegador
+const page = `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app">${html}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`
 ```
 
-### Cliente
+<Aside type="caution">
+No SSR, uma string que começa com `<` é tratada como HTML pronto e emitida sem escape, inclusive o resultado de `${state.get()}`. Escape dado de usuário antes de interpolar. Veja [SSR](/avancado/ssr/).
+</Aside>
+
+## Router na hidratação
+
+Passe o mesmo `initialPath` no servidor e no cliente para que o roteador resolva a rota de forma síncrona na criação. No cliente, sem `initialPath`, ele usa `window.location`.
 
 ```typescript
-import { render, html, createState, hydrateReactiveNodes } from '@_bashell/slash'
-
-// Recuperar estado
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-// Criar map de estados
-const reactives = new Map()
-Object.entries(stateData).forEach(([id, value]) => {
-  reactives.set(id, createState({ value }))
-})
-
-// Hidratar
-const root = document.getElementById('app')
-if (root) {
-  hydrateReactiveNodes(root, reactives)
-}
-
-// Renderizar normalmente (reutiliza DOM)
-const App = () => html`<div id="app"><h1>My App</h1></div>`
-render(App, root)
+const router = createRouter({ routes, initialPath: location.pathname })
+render(html`<${App} />`, '#app')
 ```
 
-## Exemplo Avançado: Lista Reativa
+## O que não existe
 
-### Servidor
+Os helpers abaixo existem no código-fonte como internos, mas **não são exportados** pelo pacote e não fazem parte da API pública: `setHydrateContext`, `getHydrateContext`, `hHydrate`, `hydrateChild`, `skipReactiveMarkers`, `hydrateReactiveNodes`, `hydrateReactiveAttributes` e `walkAndHydrateReactiveAttributes`. Em particular, `hHydrate` não está ligado ao `render()`.
 
-```typescript
-import { renderToString, htmlString, createState } from '@_bashell/slash'
+## Boas práticas
 
-type Todo = { id: number; text: string; done: boolean }
+- Renderize no cliente a mesma view que o servidor renderizou, para a troca de HTML não mudar o layout.
+- Garanta que o cliente comece com os mesmos dados do servidor, senão o conteúdo muda no momento do `render()`.
+- Embuta o estado sempre com `serializeStateForScript`.
+- Mantenha o `container` do cliente com o mesmo seletor usado no servidor.
 
-const todos = createState<Todo[]>({
-  value: [
-    { id: 1, text: 'Learn SSR', done: true },
-    { id: 2, text: 'Learn Hydration', done: false }
-  ]
-})
+## Próximos passos
 
-const TodoApp = () => {
-  const { value: items } = todos.get()
-
-  return htmlString`
-    <div id="app">
-      <h1>Todo List</h1>
-      <ul>
-        ${items.map(todo => htmlString`
-          <li class=${todo.done ? 'done' : ''}>
-            <input type="checkbox" checked=${todo.done} data-id="${todo.id}" />
-            <span>${todo.text}</span>
-          </li>
-        `)}
-      </ul>
-      <button class="add">Add Todo</button>
-    </div>
-  `
-}
-
-const { html, state } = renderToString(TodoApp)
-```
-
-### Cliente
-
-```typescript
-import {
-  createState,
-  hydrateReactiveNodes,
-  walkAndHydrateReactiveAttributes
-} from '@_bashell/slash'
-
-type Todo = { id: number; text: string; done: boolean }
-
-// Recuperar estado
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-// Recriar state
-const todos = createState<Todo[]>({ value: stateData.s0 || [] })
-
-// Map de reactives
-const reactives = new Map()
-reactives.set('s0', todos)
-
-// Hidratar
-const app = document.getElementById('app')
-if (app) {
-  hydrateReactiveNodes(app, reactives)
-  walkAndHydrateReactiveAttributes(app, reactives)
-}
-
-// Event handlers
-app?.addEventListener('change', (e) => {
-  const target = e.target as HTMLInputElement
-  if (target.type === 'checkbox') {
-    const id = Number(target.dataset.id)
-    const current = todos.get().value
-    todos.set({
-      value: current.map(t =>
-        t.id === id ? { ...t, done: target.checked } : t
-      )
-    })
-  }
-})
-
-const addBtn = app?.querySelector('.add')
-addBtn?.addEventListener('click', () => {
-  const current = todos.get().value
-  const newTodo: Todo = {
-    id: Date.now(),
-    text: `Todo ${current.length + 1}`,
-    done: false
-  }
-  todos.set({ value: [...current, newTodo] })
-})
-```
-
-## Utilitários de Hydration
-
-### `skipReactiveMarkers()`
-
-Pula marcadores reativos durante o percorrimento do DOM:
-
-```typescript
-import { skipReactiveMarkers, getHydrateContext } from '@_bashell/slash'
-
-// Durante a hidratação, pula comentários reactive-start/end
-const context = getHydrateContext()
-if (context?.cursor?.nodeType === Node.COMMENT_NODE) {
-  skipReactiveMarkers()
-}
-```
-
-### `hydrateChild()`
-
-Hidrata um child individual durante o processo:
-
-```typescript
-import { hydrateChild } from '@_bashell/slash'
-
-// Hidratar um child específico
-hydrateChild(someChildNode)
-```
-
-## Fluxo Completo SSR + Hydration
-
-### 1. Servidor Renderiza
-
-```typescript
-const { html, state } = renderToString(App)
-// html: HTML estático com marcadores
-// state: { s0: valor0, s1: valor1, ... }
-```
-
-### 2. HTML é Enviado ao Navegador
-
-```html
-<div id="app">
-  Contador: <!--reactive-start:s0-->42<!--reactive-end:s0-->
-  <button class="btn" data-reactive-class="s1">Click</button>
-</div>
-<script id="__SLASH_STATE__" type="application/json">
-{"s0":42,"s1":"active"}
-</script>
-```
-
-### 3. Navegador Exibe HTML Imediatamente
-
-O usuário vê o conteúdo antes do JavaScript carregar.
-
-### 4. JavaScript Carrega e Hidrata
-
-```typescript
-// Recuperar estado
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-
-// Recriar states
-const count = createState({ value: stateData.s0 })
-const btnClass = createState({ value: stateData.s1 })
-
-const reactives = new Map([
-  ['s0', count],
-  ['s1', btnClass]
-])
-
-// Hidratar
-const app = document.getElementById('app')
-hydrateReactiveNodes(app, reactives)
-walkAndHydrateReactiveAttributes(app, reactives)
-
-// Reconectar event handlers
-const btn = app?.querySelector('.btn')
-btn?.addEventListener('click', () => {
-  count.set({ value: count.get().value + 1 })
-})
-```
-
-### 5. Aplicação Totalmente Interativa
-
-Agora os estados reativos estão funcionando e a aplicação responde a eventos.
-
-## Boas Práticas
-
-### ✅ Serializar Estado Corretamente
-
-```typescript
-// Servidor: incluir estado no HTML
-const { html, state } = renderToString(App)
-
-const fullHtml = `
-  ${html}
-  <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-`
-```
-
-### ✅ Manter Estrutura DOM Idêntica
-
-O HTML renderizado no cliente deve ter a **mesma estrutura** do servidor:
-
-```typescript
-// ❌ ERRADO: Estruturas diferentes
-// Servidor: htmlString`<div><h1>Title</h1></div>`
-// Cliente:  html`<div><p>Title</p></div>`
-
-// ✅ CORRETO: Mesma estrutura
-// Servidor: htmlString`<div><h1>Title</h1></div>`
-// Cliente:  html`<div><h1>Title</h1></div>`
-```
-
-### ✅ Hidratar Antes de Adicionar Event Handlers
-
-```typescript
-// 1. Hidratar primeiro
-hydrateReactiveNodes(app, reactives)
-walkAndHydrateReactiveAttributes(app, reactives)
-
-// 2. Depois adicionar event handlers
-button.addEventListener('click', handleClick)
-```
-
-### ✅ Limpar Script de Estado
-
-```typescript
-// Remover script após hidratar (opcional, para limpeza)
-const stateScript = document.getElementById('__SLASH_STATE__')
-stateScript?.remove()
-```
-
-### ❌ Evitar Renderizar do Zero
-
-```typescript
-// ❌ ERRADO: Recria todo o DOM
-const root = document.getElementById('app')
-root.innerHTML = '' // Joga fora o DOM do servidor!
-render(App, root)
-
-// ✅ CORRETO: Reutiliza DOM existente
-hydrateReactiveNodes(root, reactives)
-```
-
-## Debugging Hydration
-
-### Ver Marcadores Reativos
-
-Abra DevTools e inspecione o HTML:
-
-```html
-<div>
-  Count: <!--reactive-start:s0-->42<!--reactive-end:s0-->
-</div>
-```
-
-### Verificar Estado Serializado
-
-```typescript
-const stateData = JSON.parse(
-  document.getElementById('__SLASH_STATE__')?.textContent || '{}'
-)
-console.log('Estado do servidor:', stateData)
-```
-
-### Verificar Atributos Reativos
-
-```typescript
-const elements = document.querySelectorAll('[data-reactive-class]')
-console.log('Elementos com classes reativas:', elements)
-```
-
-## Limitações
-
-1. **Event Handlers não são serializados**: Você precisa reconectá-los manualmente no cliente
-2. **Estrutura DOM deve ser idêntica**: Diferenças entre servidor/cliente causam problemas
-3. **Funções não podem ser serializadas**: Apenas dados primitivos e objetos simples
-
-## Próximos Passos
-
-- Veja [Universal Data Loading](/avancado/data-loading) para data fetching isomórfico
-- Explore [SSR](/avancado/ssr) para entender a renderização no servidor
-- Confira exemplos práticos no [template slash-ssr](https://github.com/bashell-rrocha/slash-ssr)
-- Para sites estáticos com ilhas, veja [Geração Estática (SSG)](/avancado/ssg)
+- [SSR](/avancado/ssr/) - Renderização no servidor
+- [Data Loading](/avancado/data-loading/) - Loaders e cache entre servidor e cliente
