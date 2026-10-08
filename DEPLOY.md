@@ -2,7 +2,7 @@
 
 ## Deploy automático (padrão)
 
-O workflow `.github/workflows/deploy.yml` publica o site no projeto `slash-docs` do Cloudflare Pages
+O workflow `.github/workflows/deploy.yml` publica o site no projeto `slash-docs` do Cloudflare Pages (conta bashell, `https://slash-docs-59t.pages.dev`)
 sempre que a `main` recebe um push (git flow: `release/x.y.z` -> `main`). Também pode ser disparado
 manualmente em **Actions → deploy → Run workflow**.
 
@@ -63,7 +63,7 @@ bunx wrangler pages deploy dist --project-name=slash-docs
 Na primeira execução, o Wrangler vai:
 1. Criar o projeto "slash-docs" automaticamente
 2. Fazer o deploy inicial
-3. Te dar uma URL tipo: `https://slash-docs.pages.dev`
+3. Te dar uma URL tipo: `https://slash-docs-59t.pages.dev`
 
 ## Configurar Custom Domain (bashell.com.br)
 
@@ -89,7 +89,7 @@ Após o primeiro deploy:
    Name:   slash
    Type:   CNAME
    TTL:    3600
-   Data:   slash-docs.pages.dev
+   Data:   slash-docs-59t.pages.dev
    ```
 
 ### 3. Aguarde propagação DNS
@@ -101,7 +101,7 @@ Após o primeiro deploy:
 ## Verificar deploy
 
 Após deploy bem-sucedido:
-- URL temporária: https://slash-docs.pages.dev
+- URL temporária: https://slash-docs-59t.pages.dev
 - URL custom (após DNS): https://slash.bashell.com.br
 
 ## Troubleshooting
