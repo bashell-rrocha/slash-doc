@@ -1,0 +1,380 @@
+---
+title: Componentes
+description: Criando componentes funcionais reutilizáveis com Slash
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## O que são componentes?
+
+No Slash, componentes são **funções JavaScript puras** que retornam elementos DOM. Não há classes, hooks especiais ou APIs complexas - apenas funções que recebem props e retornam elementos criados com `h()` ou `html`.
+
+```typescript
+import { html } from '@_bashell/slash'
+
+// Componente simples
+function Button({ label, onClick }) {
+  return html`
+    <button onClick=${onClick}>
+      ${label}
+    </button>
+  `
+}
+
+// Usando o componente
+const app = html`
+  <div>
+    <${Button} label="Clique aqui" onClick=${() => console.log('Clicado!')} />
+  </div>
+`
+```
+
+## Anatomia de um componente
+
+Um componente Slash típico segue esta estrutura:
+
+```typescript
+import { html, createState } from '@_bashell/slash'
+import type { Component } from '@_bashell/slash'
+
+type CounterProps = {
+  initialValue?: number
+  onValueChange?: (value: number) => void
+}
+
+const Counter: Component<CounterProps> = ({ initialValue = 0, onValueChange }) => {
+  const count = createState(initialValue)
+
+  const increment = () => {
+    const newValue = count.get() + 1
+    count.set(newValue)
+    onValueChange?.(newValue)
+  }
+
+  return html`
+    <div class="counter">
+      <p>Contador: ${count}</p>
+      <button onClick=${increment}>+1</button>
+    </div>
+  `
+}
+```
+
+### Características principais
+
+1. **Função pura**: Componente é apenas uma função
+2. **Props tipadas**: Use TypeScript para definir o contrato
+3. **Retorno**: Qualquer `Child` válido (Node, string, número, array, etc.)
+4. **Estado local**: Crie estados com `createState()` dentro do componente
+5. **Event handlers**: Passe funções diretamente às props
+
+## Props
+
+Props são o mecanismo de passagem de dados para componentes. No Slash, props são simplesmente o primeiro argumento da função do componente.
+
+### Props básicas
+
+```typescript
+type GreetingProps = {
+  name: string
+  age?: number
+}
+
+function Greeting({ name, age }: GreetingProps) {
+  return html`
+    <div>
+      <h1>Olá, ${name}!</h1>
+      ${age && html`<p>Você tem ${age} anos</p>`}
+    </div>
+  `
+}
+
+// Uso
+const app = html`<${Greeting} name="João" age=${25} />`
+```
+
+### Props com valores padrão
+
+```typescript
+function Panel({ title = 'Sem título', collapsed = false }: {
+  title?: string
+  collapsed?: boolean
+}) {
+  const isOpen = createState(!collapsed)
+
+  return html`
+    <div class="panel">
+      <h3 onClick=${() => isOpen.set(!isOpen.get())}>
+        ${title}
+      </h3>
+      ${isOpen && html`<div class="panel-content">Conteúdo aqui</div>`}
+    </div>
+  `
+}
+```
+
+### Props reativas
+
+Você pode passar estados reativos como props:
+
+```typescript
+import { createState, html } from '@_bashell/slash'
+
+function Display({ count }) {
+  // count é um State<number>, automaticamente reativo
+  return html`<p>Valor: ${count}</p>`
+}
+
+const value = createState(0)
+
+const app = html`
+  <div>
+    <${Display} count=${value} />
+    <button onClick=${() => value.set(value.get() + 1)}>+1</button>
+  </div>
+`
+```
+
+<Aside type="tip">
+Passar estados reativos como props permite que componentes filhos reajam automaticamente às mudanças sem precisar re-renderizar o componente pai!
+</Aside>
+
+## Children
+
+Children são elementos filhos passados para um componente. No Slash, children são apenas mais uma prop.
+
+### Recebendo children
+
+```typescript
+type CardProps = {
+  title: string
+  children: Child // tipo do Slash
+}
+
+function Card({ title, children }: CardProps) {
+  return html`
+    <div class="card">
+      <h2>${title}</h2>
+      <div class="card-body">
+        ${children}
+      </div>
+    </div>
+  `
+}
+
+// Uso
+const app = html`
+  <${Card} title="Meu Card">
+    <p>Este é o conteúdo do card</p>
+    <button>Ação</button>
+  </${Card}>
+`
+```
+
+### Children múltiplos
+
+Children podem ser qualquer valor válido do tipo `Child`:
+
+```typescript
+import type { Child } from '@_bashell/slash'
+
+function Layout({ children }: { children: Child }) {
+  return html`
+    <div class="layout">
+      ${children}
+    </div>
+  `
+}
+
+// Children como array
+const app = html`
+  <${Layout}>
+    ${[
+      html`<header>Cabeçalho</header>`,
+      html`<main>Conteúdo</main>`,
+      html`<footer>Rodapé</footer>`,
+    ]}
+  </${Layout}>
+`
+```
+
+### Children condicionais
+
+```typescript
+function Alert({ type, message, showIcon = true }: {
+  type: 'info' | 'error' | 'success'
+  message: string
+  showIcon?: boolean
+}) {
+  const icons = {
+    info: 'ℹ️',
+    error: '❌',
+    success: '✅'
+  }
+
+  return html`
+    <div class="alert alert-${type}">
+      ${showIcon && html`<span class="icon">${icons[type]}</span>`}
+      <span class="message">${message}</span>
+    </div>
+  `
+}
+```
+
+## Composição de componentes
+
+A composição é o padrão principal para reutilizar lógica no Slash.
+
+### Exemplo: Lista de tarefas
+
+```typescript
+import { html, createState } from '@_bashell/slash'
+import type { Component } from '@_bashell/slash'
+
+type Task = {
+  id: number
+  title: string
+  completed: boolean
+}
+
+// Componente de item individual
+const TaskItem: Component<{ task: Task; onToggle: (id: number) => void }> = ({
+  task,
+  onToggle
+}) => {
+  return html`
+    <li class=${task.completed ? 'completed' : ''}>
+      <input
+        type="checkbox"
+        checked=${task.completed}
+        onChange=${() => onToggle(task.id)}
+      />
+      <span>${task.title}</span>
+    </li>
+  `
+}
+
+// Componente de lista
+const TaskList: Component = () => {
+  const tasks = createState<Task[]>([
+    { id: 1, title: 'Aprender Slash', completed: false },
+    { id: 2, title: 'Criar app', completed: false },
+  ])
+
+  const toggleTask = (id: number) => {
+    const current = tasks.get()
+    tasks.set(
+      current.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
+    )
+  }
+
+  return html`
+    <div class="task-list">
+      <h2>Minhas Tarefas</h2>
+      <ul>
+        ${tasks.get().map((task) =>
+          html`<${TaskItem} task=${task} onToggle=${toggleTask} />`
+        )}
+      </ul>
+    </div>
+  `
+}
+```
+
+<Aside type="caution">
+Ao renderizar listas, sempre use `.get()` no estado para obter o array atual. O Slash não possui um helper `For` como Solid - você usa `.map()` nativo do JavaScript.
+</Aside>
+
+## Componentes com estado complexo
+
+Para componentes com múltiplos estados relacionados, agrupe-os em um único objeto:
+
+```typescript
+import { html, createState, batch } from '@_bashell/slash'
+
+function UserForm() {
+  const formState = createState({
+    name: '',
+    email: '',
+    errors: {
+      name: '',
+      email: ''
+    }
+  })
+
+  const validate = () => {
+    const state = formState.get()
+    const errors = { name: '', email: '' }
+
+    if (!state.name.trim()) {
+      errors.name = 'Nome é obrigatório'
+    }
+
+    if (!state.email.includes('@')) {
+      errors.email = 'Email inválido'
+    }
+
+    // Usa batch para agrupar múltiplas atualizações
+    batch(() => {
+      formState.set({ ...state, errors })
+    })
+
+    return !errors.name && !errors.email
+  }
+
+  const handleSubmit = (e: Event) => {
+    e.preventDefault()
+    if (validate()) {
+      console.log('Formulário válido!', formState.get())
+    }
+  }
+
+  return html`
+    <form onSubmit=${handleSubmit}>
+      <div>
+        <input
+          type="text"
+          placeholder="Nome"
+          value=${formState.get().name}
+          onInput=${(e: Event) => {
+            const state = formState.get()
+            formState.set({
+              ...state,
+              name: (e.target as HTMLInputElement).value,
+              errors: { ...state.errors, name: '' }
+            })
+          }}
+        />
+        ${formState.get().errors.name &&
+          html`<span class="error">${formState.get().errors.name}</span>`}
+      </div>
+
+      <div>
+        <input
+          type="email"
+          placeholder="Email"
+          value=${formState.get().email}
+          onInput=${(e: Event) => {
+            const state = formState.get()
+            formState.set({
+              ...state,
+              email: (e.target as HTMLInputElement).value,
+              errors: { ...state.errors, email: '' }
+            })
+          }}
+        />
+        ${formState.get().errors.email &&
+          html`<span class="error">${formState.get().errors.email}</span>`}
+      </div>
+
+      <button type="submit">Enviar</button>
+    </form>
+  `
+}
+```
+
+## Próximos passos
+
+- [Lifecycle e Cleanup](/componentes/lifecycle/) - Gerenciando recursos e limpeza
+- [Roteamento](/roteamento/conceitos/) - Criando SPAs com router
+- [Formulários](/formularios/validacao/) - Trabalhando com forms e validação

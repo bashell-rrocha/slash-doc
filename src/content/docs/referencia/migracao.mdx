@@ -1,0 +1,936 @@
+---
+title: Migração e Integração
+description: Guia completo para migrar de outras bibliotecas, integrar Slash com projetos existentes e configurar build tools
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+# Migração e Integração
+
+Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bibliotecas, integrando com projetos existentes e configurando ferramentas de build.
+
+---
+
+## Instalação
+
+<Tabs>
+  <TabItem label="bun">
+  ```bash
+  bun add @_bashell/slash
+  ```
+  </TabItem>
+
+  <TabItem label="npm">
+  ```bash
+  npm install @_bashell/slash
+  ```
+  </TabItem>
+
+  <TabItem label="pnpm">
+  ```bash
+  pnpm add @_bashell/slash
+  ```
+  </TabItem>
+
+  <TabItem label="yarn">
+  ```bash
+  yarn add @_bashell/slash
+  ```
+  </TabItem>
+
+  <TabItem label="CDN">
+  ```html
+  <!-- UMD build -->
+  <script src="https://unpkg.com/@_bashell/slash"></script>
+
+  <!-- ES Module -->
+  <script type="module">
+    import { html, createState } from 'https://esm.sh/@_bashell/slash'
+  </script>
+  ```
+  </TabItem>
+</Tabs>
+
+---
+
+## Migrando de React
+
+### Mapeamento de Conceitos
+
+| React | Slash | Exemplo |
+|-------|-------|---------|
+| `useState()` | `createState()` | `const [count, setCount] = useState(0)` → `const count = createState(0)` |
+| `useEffect()` | `state.watch()` ou código direto | Ver exemplos abaixo |
+| `useMemo()` | Funções normais | Não necessário (reactive por natureza) |
+| `useCallback()` | Funções normais | Não necessário |
+| `useRef()` | Variáveis locais | `let ref = null` |
+| `useContext()` | Estado global | `createState()` fora do componente |
+| `props` | Parâmetros de função | Idêntico |
+| JSX | `html` template tag | Ver exemplos |
+
+### Exemplo Prático de Migração
+
+<Tabs>
+  <TabItem label="Componente Simples">
+
+```jsx
+// React
+import { useState } from 'react'
+
+function Counter({ initialCount = 0 }) {
+  const [count, setCount] = useState(initialCount)
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(count + 1)}>
+        Increment
+      </button>
+      <button onClick={() => setCount(count - 1)}>
+        Decrement
+      </button>
+    </div>
+  )
+}
+```
+
+```typescript
+// Slash
+import { html, createState } from '@_bashell/slash'
+
+interface CounterProps {
+  initialCount?: number
+}
+
+function Counter({ initialCount = 0 }: CounterProps) {
+  const count = createState(initialCount)
+
+  return html`
+    <div>
+      <p>Count: ${count.get()}</p>
+      <button onclick=${() => count.set(count.get() + 1)}>
+        Increment
+      </button>
+      <button onclick=${() => count.set(count.get() - 1)}>
+        Decrement
+      </button>
+    </div>
+  `
+}
+```
+
+  </TabItem>
+
+  <TabItem label="useEffect → watch">
+
+```jsx
+// React
+import { useState, useEffect } from 'react'
+
+function Example() {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    console.log('Count changed:', count)
+
+    return () => {
+      console.log('Cleanup')
+    }
+  }, [count])
+
+  return <p>{count}</p>
+}
+```
+
+```typescript
+// Slash
+import { html, createState } from '@_bashell/slash'
+
+function Example() {
+  const count = createState(0)
+
+  const unwatch = count.watch((newVal, oldVal) => {
+    console.log('Count changed:', newVal)
+  })
+
+  onCleanup(() => {
+    console.log('Cleanup')
+    unwatch()
+  })
+
+  return html`<p>${count.get()}</p>`
+}
+```
+
+  </TabItem>
+
+  <TabItem label="Formulários">
+
+```jsx
+// React
+import { useState } from 'react'
+
+function LoginForm() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    console.log({ email, password })
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <button type="submit">Login</button>
+    </form>
+  )
+}
+```
+
+```typescript
+// Slash
+import { html, createState } from '@_bashell/slash'
+
+function LoginForm() {
+  const email = createState('')
+  const password = createState('')
+
+  const handleSubmit = (e: Event) => {
+    e.preventDefault()
+    console.log({
+      email: email.get(),
+      password: password.get()
+    })
+  }
+
+  return html`
+    <form onsubmit=${handleSubmit}>
+      <input
+        type="email"
+        value=${email.get()}
+        oninput=${(e) => email.set(e.target.value)}
+      />
+      <input
+        type="password"
+        value=${password.get()}
+        oninput=${(e) => password.set(e.target.value)}
+      />
+      <button type="submit">Login</button>
+    </form>
+  `
+}
+```
+
+  </TabItem>
+
+  <TabItem label="Listas">
+
+```jsx
+// React
+import { useState } from 'react'
+
+function TodoList() {
+  const [todos, setTodos] = useState([
+    { id: 1, text: 'Learn React' },
+    { id: 2, text: 'Build app' }
+  ])
+
+  return (
+    <ul>
+      {todos.map(todo => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+```typescript
+// Slash
+import { html, createState } from '@_bashell/slash'
+
+function TodoList() {
+  const todos = createState([
+    { id: 1, text: 'Learn Slash' },
+    { id: 2, text: 'Build app' }
+  ])
+
+  return html`
+    <ul>
+      ${todos.get().map(todo => html`
+        <li key=${todo.id}>${todo.text}</li>
+      `)}
+    </ul>
+  `
+}
+```
+
+  </TabItem>
+</Tabs>
+
+### Estratégia de Migração Incremental
+
+Você pode migrar componente por componente sem reescrever tudo:
+
+1. **Identifique componentes folha** (sem filhos React)
+2. **Migre de baixo para cima**
+3. **Use micro-frontends se necessário**
+
+```typescript
+// React component que usa Slash component
+import { useEffect, useRef } from 'react'
+import { render } from '@_bashell/slash'
+import { SlashComponent } from './slash-components'
+
+function ReactWrapper() {
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    if (containerRef.current) {
+      render(SlashComponent(), containerRef.current)
+    }
+  }, [])
+
+  return <div ref={containerRef} />
+}
+```
+
+---
+
+## Migrando de Vue
+
+### Mapeamento de Conceitos
+
+| Vue 3 | Slash | Notas |
+|-------|-------|-------|
+| `ref()` | `createState()` | `.value` vs `.get()/.set()` |
+| `computed()` | Funções | Compute on-demand |
+| `watch()` | `state.watch()` | API similar |
+| `v-if` | Ternário `? :` | JS nativo |
+| `v-for` | `.map()` | JS nativo |
+| `v-model` | `value` + `oninput` | Manual binding |
+| `onMounted()` | Código direto | Executa ao criar |
+| `onUnmounted()` | `onCleanup()` | Cleanup |
+| Template | `html` tag | HTM syntax |
+
+### Exemplo de Migração
+
+<Tabs>
+  <TabItem label="Componente Vue">
+
+```vue
+<!-- Vue 3 -->
+<script setup>
+import { ref, computed } from 'vue'
+
+const count = ref(0)
+const doubled = computed(() => count.value * 2)
+
+function increment() {
+  count.value++
+}
+</script>
+
+<template>
+  <div>
+    <p>Count: {{ count }}</p>
+    <p>Doubled: {{ doubled }}</p>
+    <button @click="increment">+</button>
+  </div>
+</template>
+```
+
+  </TabItem>
+
+  <TabItem label="Equivalente Slash">
+
+```typescript
+// Slash
+import { html, createState } from '@_bashell/slash'
+
+function Counter() {
+  const count = createState(0)
+  const doubled = () => count.get() * 2
+
+  const increment = () => {
+    count.set(count.get() + 1)
+  }
+
+  return html`
+    <div>
+      <p>Count: ${count.get()}</p>
+      <p>Doubled: ${doubled()}</p>
+      <button onclick=${increment}>+</button>
+    </div>
+  `
+}
+```
+
+  </TabItem>
+</Tabs>
+
+---
+
+## Integração com Projetos Existentes
+
+### 1. Adicionar Slash a Projeto Vanilla JS
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>My App</title>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    import { html, render, createState } from 'https://esm.sh/@_bashell/slash'
+
+    const App = () => {
+      const count = createState(0)
+
+      return html`
+        <div>
+          <h1>Hello Slash!</h1>
+          <p>Count: ${count.get()}</p>
+          <button onclick=${() => count.set(count.get() + 1)}>
+            Increment
+          </button>
+        </div>
+      `
+    }
+
+    render(App(), document.getElementById('app'))
+  </script>
+</body>
+</html>
+```
+
+### 2. Integrar com jQuery/Vanilla
+
+Slash pode conviver com jQuery ou vanilla JS:
+
+```typescript
+import { html, render, createState } from '@_bashell/slash'
+
+// Estado Slash
+const globalState = createState({
+  user: null,
+  isLoggedIn: false
+})
+
+// Component Slash
+function UserWidget() {
+  const state = globalState.get()
+
+  if (!state.isLoggedIn) {
+    return html`<button onclick=${showLoginModal}>Login</button>`
+  }
+
+  return html`<p>Welcome, ${state.user.name}!</p>`
+}
+
+// Integração com jQuery
+function showLoginModal() {
+  $('#loginModal').modal('show')
+}
+
+$('#loginForm').on('submit', function(e) {
+  e.preventDefault()
+
+  // Atualiza estado Slash
+  globalState.set({
+    user: { name: 'John' },
+    isLoggedIn: true
+  })
+
+  $('#loginModal').modal('hide')
+})
+
+// Render componente Slash
+render(UserWidget(), document.getElementById('user-widget'))
+```
+
+### 3. Web Components
+
+Encapsule Slash em Web Components:
+
+```typescript
+import { html, render, createState } from '@_bashell/slash'
+
+class CounterElement extends HTMLElement {
+  connectedCallback() {
+    const shadow = this.attachShadow({ mode: 'open' })
+
+    const count = createState(0)
+
+    const Counter = html`
+      <div>
+        <p>Count: ${count.get()}</p>
+        <button onclick=${() => count.set(count.get() + 1)}>
+          Increment
+        </button>
+      </div>
+    `
+
+    render(Counter, shadow)
+  }
+}
+
+customElements.define('slash-counter', CounterElement)
+```
+
+Uso:
+
+```html
+<slash-counter></slash-counter>
+```
+
+---
+
+## Build Tools
+
+### Vite
+
+```bash
+bun create vite my-app --template vanilla-ts
+cd my-app
+bun add @_bashell/slash
+```
+
+```typescript title="src/main.ts"
+import { html, render, createState } from '@_bashell/slash'
+import './style.css'
+
+const App = () => {
+  const count = createState(0)
+
+  return html`
+    <div>
+      <h1>Vite + Slash</h1>
+      <p>Count: ${count.get()}</p>
+      <button onclick=${() => count.set(count.get() + 1)}>
+        Increment
+      </button>
+    </div>
+  `
+}
+
+const root = document.querySelector('#app')
+if (root) {
+  render(App(), root)
+}
+```
+
+```javascript title="vite.config.js"
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  // Configuração padrão funciona!
+})
+```
+
+### Bun
+
+```bash
+bun init
+bun add @_bashell/slash
+```
+
+```typescript title="index.ts"
+import { html, render, createState } from '@_bashell/slash'
+
+const App = () => {
+  const count = createState(0)
+
+  return html`
+    <div>
+      <h1>Bun + Slash</h1>
+      <button onclick=${() => count.set(count.get() + 1)}>
+        Count: ${count.get()}
+      </button>
+    </div>
+  `
+}
+
+render(App(), document.body)
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "build": "bun build index.ts --outdir ./dist --minify"
+  }
+}
+```
+
+### Webpack
+
+```bash
+npm install --save-dev webpack webpack-cli webpack-dev-server
+npm install @_bashell/slash
+```
+
+```javascript title="webpack.config.js"
+const path = require('path')
+
+module.exports = {
+  entry: './src/index.ts',
+  output: {
+    filename: 'bundle.js',
+    path: path.resolve(__dirname, 'dist')
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        use: 'ts-loader',
+        exclude: /node_modules/
+      }
+    ]
+  },
+  resolve: {
+    extensions: ['.ts', '.js']
+  },
+  devServer: {
+    static: './dist'
+  }
+}
+```
+
+### Parcel
+
+```bash
+npm install --save-dev parcel
+npm install @_bashell/slash
+```
+
+```html title="index.html"
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Parcel + Slash</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./src/index.ts"></script>
+</body>
+</html>
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "dev": "parcel index.html",
+    "build": "parcel build index.html"
+  }
+}
+```
+
+### esbuild
+
+```bash
+npm install --save-dev esbuild
+npm install @_bashell/slash
+```
+
+```javascript title="build.js"
+require('esbuild').build({
+  entryPoints: ['src/index.ts'],
+  bundle: true,
+  outfile: 'dist/bundle.js',
+  minify: true,
+  sourcemap: true
+}).catch(() => process.exit(1))
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "build": "node build.js"
+  }
+}
+```
+
+---
+
+## TypeScript Configuration
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+<Aside type="note">
+Slash funciona perfeitamente com TypeScript sem configuração especial. Todos os tipos são exportados.
+</Aside>
+
+---
+
+## SSR Setup
+
+### Node.js + Express
+
+```bash
+bun add express @_bashell/slash
+bun add -d @types/express
+```
+
+```typescript title="server.ts"
+import express from 'express'
+import { renderToString, htmlString } from '@_bashell/slash'
+import { App } from './App'
+
+const app = express()
+
+app.get('*', (req, res) => {
+  const appHtml = renderToString(App())
+
+  const html = htmlString`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>SSR App</title>
+        <script type="module" src="/client.js"></script>
+      </head>
+      <body>
+        <div id="app">${appHtml}</div>
+      </body>
+    </html>
+  `
+
+  res.send(html)
+})
+
+app.listen(3000, () => {
+  console.log('Server running on http://localhost:3000')
+})
+```
+
+### Bun Server
+
+```typescript title="server.ts"
+import { renderToString, htmlString } from '@_bashell/slash'
+import { App } from './App'
+
+Bun.serve({
+  port: 3000,
+  fetch(req) {
+    const appHtml = renderToString(App())
+
+    const html = htmlString`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>SSR App</title>
+        </head>
+        <body>
+          <div id="app">${appHtml}</div>
+          <script type="module" src="/client.js"></script>
+        </body>
+      </html>
+    `
+
+    return new Response(html, {
+      headers: { 'Content-Type': 'text/html' }
+    })
+  }
+})
+```
+
+---
+
+## Estrutura de Projeto Recomendada
+
+### SPA (Client-Side)
+
+```
+my-app/
+├── src/
+│   ├── components/
+│   │   ├── Header.ts
+│   │   ├── Footer.ts
+│   │   └── TodoItem.ts
+│   ├── pages/
+│   │   ├── Home.ts
+│   │   ├── About.ts
+│   │   └── NotFound.ts
+│   ├── state/
+│   │   └── todoState.ts
+│   ├── router.ts
+│   ├── App.ts
+│   └── main.ts
+├── public/
+│   └── styles.css
+├── index.html
+├── package.json
+└── tsconfig.json
+```
+
+### SSR (Universal)
+
+```
+my-app/
+├── src/
+│   ├── shared/
+│   │   ├── components/
+│   │   ├── loaders/
+│   │   └── types.ts
+│   ├── server/
+│   │   ├── index.ts
+│   │   └── routes.ts
+│   ├── client/
+│   │   └── index.ts
+│   └── App.ts
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## Testing
+
+### Com Bun Test
+
+```typescript title="Counter.test.ts"
+import { test, expect } from 'bun:test'
+import { createState } from '@_bashell/slash'
+
+test('counter increments', () => {
+  const count = createState(0)
+
+  expect(count.get()).toBe(0)
+
+  count.set(5)
+  expect(count.get()).toBe(5)
+})
+
+test('state watches changes', () => {
+  const count = createState(0)
+  let called = false
+
+  count.watch((newVal) => {
+    called = true
+    expect(newVal).toBe(10)
+  })
+
+  count.set(10)
+  expect(called).toBe(true)
+})
+```
+
+### Com Vitest
+
+```bash
+bun add -d vitest happy-dom
+```
+
+```typescript title="vitest.config.ts"
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    environment: 'happy-dom'
+  }
+})
+```
+
+---
+
+## Dicas de Migração
+
+### 1. Comece Pequeno
+
+Não reescreva tudo de uma vez. Comece com:
+- Componentes novos
+- Componentes folha (sem filhos)
+- Features isoladas
+
+### 2. Use TypeScript
+
+Slash tem tipos excelentes. Use para facilitar migração:
+
+```typescript
+// Defina interfaces para seus dados
+interface User {
+  id: string
+  name: string
+  email: string
+}
+
+const user = createState<User | null>(null)
+```
+
+### 3. Mantenha Estado Global Separado
+
+```typescript title="src/state/global.ts"
+import { createState } from '@_bashell/slash'
+
+export const authState = createState({
+  user: null,
+  isAuthenticated: false
+})
+
+export const uiState = createState({
+  sidebarOpen: false,
+  theme: 'light'
+})
+```
+
+### 4. Crie Helpers Reutilizáveis
+
+```typescript title="src/utils/form.ts"
+import { createState } from '@_bashell/slash'
+
+export function createFormField<T>(initialValue: T) {
+  const value = createState(initialValue)
+  const error = createState<string | null>(null)
+  const touched = createState(false)
+
+  return {
+    value,
+    error,
+    touched,
+    reset: () => {
+      value.set(initialValue)
+      error.set(null)
+      touched.set(false)
+    }
+  }
+}
+```
+
+---
+
+## Próximos Passos
+
+- [Exemplos Práticos](/exemplos/todo-app/) - Apps completas
+- [API Reference](/referencia/api/) - Documentação da API
+- [Comparações](/referencia/slash-vs-react/) - Slash vs outras libs

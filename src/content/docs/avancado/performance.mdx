@@ -1,0 +1,583 @@
+---
+title: Performance e Best Practices
+description: Otimizações, padrões e melhores práticas para aplicações Slash de alta performance
+---
+
+import { Code, Aside, Tabs, TabItem, Card, CardGrid } from '@astrojs/starlight/components';
+
+Este guia apresenta técnicas de otimização e best practices para construir aplicações Slash performáticas e escaláveis.
+
+## Quando Usar `batch()`
+
+O `batch()` agrupa múltiplas atualizações de estado, notificando watchers apenas uma vez ao final.
+
+### Casos de Uso Ideais
+
+<CardGrid>
+  <Card title="Múltiplas Atualizações" icon="rocket">
+    Quando você atualiza o mesmo estado várias vezes em sequência
+  </Card>
+  <Card title="Estados Relacionados" icon="puzzle">
+    Quando atualiza múltiplos estados que dependem uns dos outros
+  </Card>
+  <Card title="Operações em Loop" icon="refresh">
+    Quando processa arrays/listas e atualiza estado para cada item
+  </Card>
+</CardGrid>
+
+### Exemplos
+
+#### ✅ Quando usar batch
+
+```typescript
+import { createState, batch } from '@_bashell/slash';
+
+const state = createState({ count: 0, name: 'John', active: false });
+
+// ✅ BOM: Múltiplas atualizações agrupadas
+batch(() => {
+  state.set({ ...state.get(), count: 1 });
+  state.set({ ...state.get(), name: 'Jane' });
+  state.set({ ...state.get(), active: true });
+});
+// Watchers notificados apenas 1x
+
+// ✅ BOM: Processamento de lista
+const items = [1, 2, 3, 4, 5];
+const listState = createState({ processed: [] });
+
+batch(() => {
+  items.forEach(item => {
+    const current = listState.get();
+    listState.set({
+      processed: [...current.processed, item * 2]
+    });
+  });
+});
+```
+
+#### ❌ Quando NÃO usar batch
+
+```typescript
+// ❌ RUIM: Apenas uma atualização
+batch(() => {
+  state.set({ count: 1 });
+});
+// Overhead desnecessário
+
+// ❌ RUIM: Batch aninhado (redundante)
+batch(() => {
+  batch(() => {  // Warning emitido!
+    state.set({ count: 1 });
+  });
+});
+
+// ❌ RUIM: Com operações assíncronas
+batch(() => {
+  state.set({ loading: true });
+
+  // ❌ Erro: fetchData é async, batch não aguarda
+  fetchData().then(data => {
+    state.set({ data, loading: false });
+  });
+});
+
+// ✅ CORRETO: Batch síncrono, async fora
+state.set({ loading: true });
+
+fetchData().then(data => {
+  batch(() => {
+    state.set({ data, loading: false });
+  });
+});
+```
+
+### Performance Gain
+
+```typescript
+import { createState, batch } from '@_bashell/slash';
+
+const state = createState({ a: 0, b: 0, c: 0 });
+
+let renderCount = 0;
+state.watch(() => {
+  renderCount++;
+});
+
+// Sem batch: 3 renders
+state.set({ a: 1, b: 0, c: 0 });
+state.set({ a: 1, b: 2, c: 0 });
+state.set({ a: 1, b: 2, c: 3 });
+console.log(renderCount); // 3
+
+// Com batch: 1 render
+renderCount = 0;
+batch(() => {
+  state.set({ a: 1, b: 0, c: 0 });
+  state.set({ a: 1, b: 2, c: 0 });
+  state.set({ a: 1, b: 2, c: 3 });
+});
+console.log(renderCount); // 1 ✅
+```
+
+## Otimização de Rerenders
+
+### Evite Recriar Funções
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+
+const count = createState(0);
+
+// ❌ RUIM: Cria nova função a cada render
+function Counter() {
+  return html`
+    <button onclick=${() => count.set(count.get() + 1)}>
+      Count: ${count.get()}
+    </button>
+  `;
+}
+
+// ✅ BOM: Função reutilizável
+const increment = () => count.set(count.get() + 1);
+
+function Counter() {
+  return html`
+    <button onclick=${increment}>
+      Count: ${count.get()}
+    </button>
+  `;
+}
+```
+
+### Memoização Manual
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ users: [], filters: {} });
+
+// ❌ RUIM: Recalcula sempre
+function getFilteredUsers() {
+  const { users, filters } = state.get();
+  return users.filter(user => {
+    // Computação pesada
+    return matchesFilters(user, filters);
+  });
+}
+
+// ✅ BOM: Cacheia resultado
+let cachedFilters = null;
+let cachedResult = null;
+
+function getFilteredUsers() {
+  const { users, filters } = state.get();
+
+  // Só recalcula se filtros mudaram
+  if (filters !== cachedFilters) {
+    cachedFilters = filters;
+    cachedResult = users.filter(user => matchesFilters(user, filters));
+  }
+
+  return cachedResult;
+}
+```
+
+### Divida Estados Grandes
+
+```typescript
+// ❌ RUIM: Estado monolítico
+const appState = createState({
+  user: { id: 1, name: 'John', email: '...' },
+  settings: { theme: 'dark', lang: 'en', ... },
+  cart: { items: [...], total: 0 },
+  notifications: { list: [...], unread: 0 },
+  // ... 50+ propriedades
+});
+
+// Qualquer mudança notifica TODOS os watchers
+
+// ✅ BOM: Estados separados por domínio
+const userState = createState({ id: 1, name: 'John', email: '...' });
+const settingsState = createState({ theme: 'dark', lang: 'en' });
+const cartState = createState({ items: [], total: 0 });
+const notificationsState = createState({ list: [], unread: 0 });
+
+// Mudanças isoladas, watchers específicos
+```
+
+## Memory Management
+
+### Sempre Faça Cleanup
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+
+const globalState = createState({ data: [] });
+
+// ❌ RUIM: Watcher sem cleanup (memory leak)
+function Component() {
+  globalState.watch((state) => {
+    console.log('State changed:', state);
+  });
+  // Se Component() for chamado múltiplas vezes,
+  // acumula watchers que nunca são removidos!
+
+  return html`<div>...</div>`;
+}
+
+// ✅ BOM: Cleanup apropriado
+function Component() {
+  const unwatch = globalState.watch((state) => {
+    console.log('State changed:', state);
+  });
+
+  const el = html`<div>...</div>` as HTMLElement;
+
+  // Cleanup quando elemento for destruído
+  const cleanup = () => unwatch();
+
+  // Registra cleanup no elemento
+  if (el instanceof Node) {
+    const { addCleanup } = require('@_bashell/slash/lifecycle/cleanup');
+    addCleanup(el, cleanup);
+  }
+
+  return el;
+}
+```
+
+### Use WeakMap para Cache
+
+```typescript
+// ❌ RUIM: Map comum (memory leak)
+const cache = new Map<string, any>();
+
+function cacheData(key: string, data: any) {
+  cache.set(key, data);
+}
+// Dados nunca são garbage collected
+
+// ✅ BOM: WeakMap para cache
+const cache = new WeakMap<object, any>();
+
+function cacheData(obj: object, data: any) {
+  cache.set(obj, data);
+}
+// Quando obj não tem mais referências, é GC automaticamente
+```
+
+### Destrua Nós Antigos
+
+```typescript
+import { render, destroyNode } from '@_bashell/slash';
+
+const container = document.querySelector('#app');
+const view1 = html`<div>View 1</div>`;
+
+// ✅ BOM: Destruir antes de trocar view
+const oldNodes = Array.from(container.childNodes);
+oldNodes.forEach(node => destroyNode(node));
+
+// Agora renderiza nova view
+render(view2, container);
+```
+
+## Cleanup Patterns
+
+### Pattern 1: Componente com Estado Local
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+
+function Timer() {
+  // Estado local do componente
+  const time = createState(0);
+
+  // Interval
+  const interval = setInterval(() => {
+    time.set(time.get() + 1);
+  }, 1000);
+
+  const el = html`
+    <div>Time: ${time.get()}</div>
+  ` as HTMLElement;
+
+  // Cleanup: parar interval
+  addCleanup(el, () => {
+    clearInterval(interval);
+  });
+
+  return el;
+}
+```
+
+### Pattern 2: Event Listeners
+
+```typescript
+import { html } from '@_bashell/slash';
+import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+
+function WindowResizeTracker() {
+  const handler = () => {
+    console.log('Window resized:', window.innerWidth);
+  };
+
+  // Registra listener
+  window.addEventListener('resize', handler);
+
+  const el = html`<div>Tracking resize</div>` as HTMLElement;
+
+  // Cleanup: remover listener
+  addCleanup(el, () => {
+    window.removeEventListener('resize', handler);
+  });
+
+  return el;
+}
+```
+
+### Pattern 3: Recursos Externos
+
+```typescript
+import { html } from '@_bashell/slash';
+import { addCleanup } from '@_bashell/slash/lifecycle/cleanup';
+
+function WebSocketComponent() {
+  const ws = new WebSocket('ws://localhost:8080');
+
+  ws.onmessage = (event) => {
+    console.log('Message:', event.data);
+  };
+
+  const el = html`<div>Connected</div>` as HTMLElement;
+
+  // Cleanup: fechar conexão
+  addCleanup(el, () => {
+    ws.close();
+  });
+
+  return el;
+}
+```
+
+## Performance Best Practices
+
+### 1. Minimize Deep Cloning
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+// ❌ RUIM: Clonar objeto grande toda hora
+const state = createState({
+  hugeArray: new Array(10000).fill({}),
+  config: { /* ... */ }
+});
+
+// Clona tudo a cada set()
+state.set({
+  ...state.get(),
+  config: { updated: true }
+});
+
+// ✅ BOM: Separe dados grandes
+const dataState = createState({
+  hugeArray: new Array(10000).fill({})
+});
+
+const configState = createState({
+  config: { updated: false }
+});
+
+// Apenas config é clonado
+configState.set({ config: { updated: true } });
+```
+
+### 2. Evite Watchers Desnecessários
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ count: 0 });
+
+// ❌ RUIM: Watcher que só loga
+state.watch((s) => {
+  console.log('State:', s);
+});
+
+// ✅ BOM: Use apenas quando necessário para UI
+state.watch((s) => {
+  updateUI(s);
+});
+```
+
+### 3. Use Lazy Loading
+
+```typescript
+import { html } from '@_bashell/slash';
+
+// ❌ RUIM: Importa tudo upfront
+import ComponentA from './a';
+import ComponentB from './b';
+import ComponentC from './c';
+
+// ✅ BOM: Dynamic import
+async function App() {
+  const route = getCurrentRoute();
+
+  if (route === '/a') {
+    const { ComponentA } = await import('./a');
+    return html`<${ComponentA} />`;
+  } else if (route === '/b') {
+    const { ComponentB } = await import('./b');
+    return html`<${ComponentB} />`;
+  }
+}
+```
+
+### 4. Debounce em Inputs
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+
+const searchQuery = createState('');
+const results = createState([]);
+
+// ❌ RUIM: Busca a cada tecla
+function handleInput(e: Event) {
+  const value = (e.target as HTMLInputElement).value;
+  searchQuery.set(value);
+
+  // API call a cada keystroke!
+  fetchResults(value).then(data => {
+    results.set(data);
+  });
+}
+
+// ✅ BOM: Debounce
+let debounceTimer: number;
+
+function handleInput(e: Event) {
+  const value = (e.target as HTMLInputElement).value;
+  searchQuery.set(value);
+
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    fetchResults(value).then(data => {
+      results.set(data);
+    });
+  }, 300);
+}
+```
+
+### 5. Virtual Scrolling para Listas Grandes
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+
+const items = createState(new Array(10000).fill(null).map((_, i) => ({ id: i, name: `Item ${i}` })));
+
+// ❌ RUIM: Renderiza 10k itens
+function List() {
+  return html`
+    <div>
+      ${items.get().map(item => html`
+        <div key=${item.id}>${item.name}</div>
+      `)}
+    </div>
+  `;
+}
+
+// ✅ BOM: Renderiza apenas itens visíveis
+const visibleRange = createState({ start: 0, end: 50 });
+
+function VirtualList() {
+  const visible = items.get().slice(
+    visibleRange.get().start,
+    visibleRange.get().end
+  );
+
+  return html`
+    <div onscroll=${handleScroll}>
+      ${visible.map(item => html`
+        <div key=${item.id}>${item.name}</div>
+      `)}
+    </div>
+  `;
+}
+```
+
+## Checklist de Performance
+
+<Aside type="tip">
+Use este checklist antes de fazer deploy em produção:
+</Aside>
+
+- [ ] Todos os watchers têm cleanup apropriado
+- [ ] Estados grandes foram divididos em estados menores
+- [ ] Operações custosas usam `batch()`
+- [ ] Não há batch aninhado desnecessário
+- [ ] Event listeners são removidos no cleanup
+- [ ] Não há estado criado dentro de componentes
+- [ ] Computações pesadas são memoizadas
+- [ ] Listas grandes usam virtual scrolling
+- [ ] Inputs com busca usam debounce
+- [ ] Dev mode está desabilitado em produção
+- [ ] Componentes não usados são lazy-loaded
+- [ ] WeakMap é usado para cache quando apropriado
+
+## Profiling
+
+### Medir Performance de Watchers
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ count: 0 });
+
+const start = performance.now();
+
+state.watch((s) => {
+  console.log('Watcher executado');
+});
+
+state.set({ count: 1 });
+
+const end = performance.now();
+console.log(`Tempo de notificação: ${end - start}ms`);
+```
+
+### Medir Impacto do Batch
+
+```typescript
+import { createState, batch } from '@_bashell/slash';
+
+const state = createState({ a: 0, b: 0, c: 0 });
+
+// Sem batch
+const start1 = performance.now();
+state.set({ a: 1, b: 0, c: 0 });
+state.set({ a: 1, b: 2, c: 0 });
+state.set({ a: 1, b: 2, c: 3 });
+const end1 = performance.now();
+
+// Com batch
+const start2 = performance.now();
+batch(() => {
+  state.set({ a: 1, b: 0, c: 0 });
+  state.set({ a: 1, b: 2, c: 0 });
+  state.set({ a: 1, b: 2, c: 3 });
+});
+const end2 = performance.now();
+
+console.log(`Sem batch: ${end1 - start1}ms`);
+console.log(`Com batch: ${end2 - start2}ms`);
+console.log(`Melhoria: ${((end1 - start1) / (end2 - start2)).toFixed(2)}x`);
+```
+
+## Próximos Passos
+
+- [Developer Experience](/avancado/dev-mode/) - Debugging e warnings
+- [Exemplos Práticos](/exemplos/todo-app/) - Aplicações completas
+- [API Reference](/referencia/api/) - Documentação completa da API

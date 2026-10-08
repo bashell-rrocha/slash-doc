@@ -1,0 +1,799 @@
+---
+title: Blog com SSR
+description: Exemplo prático de um blog completo com Server-Side Rendering usando Slash
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+# Blog com SSR
+
+Este exemplo demonstra como criar um blog completo usando Slash com Server-Side Rendering (SSR). Você aprenderá sobre renderização no servidor, hidratação no cliente, data loading isomórfico e otimização de performance.
+
+## Funcionalidades
+
+- ✅ Renderização no servidor (SSR) para SEO e performance
+- ✅ Hidratação no cliente para interatividade
+- ✅ Listagem de posts com paginação
+- ✅ Visualização de post individual
+- ✅ Sistema de comentários
+- ✅ Data loading isomórfico
+- ✅ Meta tags dinâmicas para SEO
+- ✅ Markdown rendering
+
+## Estrutura do Projeto
+
+```
+src/
+├── server/
+│   ├── index.ts           # Servidor HTTP
+│   ├── routes.ts          # Definição de rotas
+│   └── data/
+│       ├── posts.ts       # API de posts
+│       └── comments.ts    # API de comentários
+├── client/
+│   ├── index.ts           # Entry point do cliente
+│   └── hydrate.ts         # Lógica de hidratação
+├── shared/
+│   ├── components/
+│   │   ├── Layout.ts      # Layout base
+│   │   ├── PostList.ts    # Lista de posts
+│   │   ├── PostDetail.ts  # Detalhe do post
+│   │   └── Comments.ts    # Sistema de comentários
+│   ├── loaders/
+│   │   ├── posts.ts       # Loader de posts
+│   │   └── comments.ts    # Loader de comentários
+│   └── types.ts           # Tipos compartilhados
+└── public/
+    └── styles.css         # Estilos globais
+```
+
+## Tipos TypeScript
+
+```typescript title="src/shared/types.ts"
+export interface Post {
+  id: string
+  slug: string
+  title: string
+  excerpt: string
+  content: string
+  author: {
+    name: string
+    avatar: string
+  }
+  publishedAt: string
+  tags: string[]
+  readTime: number
+}
+
+export interface Comment {
+  id: string
+  postId: string
+  author: string
+  content: string
+  createdAt: string
+}
+
+export interface PostListResponse {
+  posts: Post[]
+  total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
+}
+```
+
+## Data Loaders Isomórficos
+
+Loaders que funcionam tanto no servidor quanto no cliente:
+
+```typescript title="src/shared/loaders/posts.ts" {5-7,15-17}
+import { createLoader } from '@_bashell/slash'
+import type { Post, PostListResponse } from '../types'
+
+// Loader para lista de posts com cache de 5 minutos
+export const postsLoader = createLoader<PostListResponse>(
+  async (page: number = 1, pageSize: number = 10) => {
+    const response = await fetch(
+      `/api/posts?page=${page}&pageSize=${pageSize}`
+    )
+    if (!response.ok) {
+      throw new Error('Failed to load posts')
+    }
+    return response.json()
+  },
+  {
+    ttl: 5 * 60 * 1000, // 5 minutos
+    key: (page, pageSize) => `posts:${page}:${pageSize}`
+  }
+)
+
+// Loader para post individual com cache de 10 minutos
+export const postLoader = createLoader<Post>(
+  async (slug: string) => {
+    const response = await fetch(`/api/posts/${slug}`)
+    if (!response.ok) {
+      throw new Error('Post not found')
+    }
+    return response.json()
+  },
+  {
+    ttl: 10 * 60 * 1000,
+    key: (slug) => `post:${slug}`
+  }
+)
+```
+
+```typescript title="src/shared/loaders/comments.ts"
+import { createLoader, createState } from '@_bashell/slash'
+import type { Comment } from '../types'
+
+// Loader para comentários
+export const commentsLoader = createLoader<Comment[]>(
+  async (postId: string) => {
+    const response = await fetch(`/api/posts/${postId}/comments`)
+    if (!response.ok) {
+      throw new Error('Failed to load comments')
+    }
+    return response.json()
+  },
+  {
+    ttl: 2 * 60 * 1000, // 2 minutos
+    key: (postId) => `comments:${postId}`
+  }
+)
+
+// Estado para novo comentário
+export const newCommentState = createState({
+  author: '',
+  content: '',
+  isSubmitting: false
+})
+```
+
+<Aside type="tip">
+Os loaders criados com `createLoader()` funcionam automaticamente no servidor e no cliente, com cache compartilhado via hidratação.
+</Aside>
+
+## Componente Layout
+
+Layout base compartilhado por todas as páginas:
+
+```typescript title="src/shared/components/Layout.ts"
+import { html, type VNode } from '@_bashell/slash'
+
+interface LayoutProps {
+  title: string
+  description: string
+  children: VNode | VNode[]
+}
+
+export const Layout = ({ title, description, children }: LayoutProps): VNode => {
+  return html`
+    <div class="layout">
+      <header class="header">
+        <div class="container">
+          <h1 class="logo">
+            <a href="/">My Blog</a>
+          </h1>
+          <nav class="nav">
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+          </nav>
+        </div>
+      </header>
+
+      <main class="main">
+        <div class="container">
+          ${children}
+        </div>
+      </main>
+
+      <footer class="footer">
+        <div class="container">
+          <p>&copy; 2026 My Blog. Built with Slash.</p>
+        </div>
+      </footer>
+    </div>
+  `
+}
+```
+
+## Componente PostList
+
+Lista de posts com paginação:
+
+```typescript title="src/shared/components/PostList.ts"
+import { html, type VNode, createState } from '@_bashell/slash'
+import { postsLoader } from '../loaders/posts'
+import type { Post } from '../types'
+
+export const PostList = (): VNode => {
+  const pageState = createState(1)
+  const pageSize = 10
+
+  const formatDate = (date: string): string => {
+    return new Date(date).toLocaleDateString('pt-BR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+  }
+
+  const renderPost = (post: Post) => html`
+    <article class="post-card">
+      <h2>
+        <a href=${`/posts/${post.slug}`}>${post.title}</a>
+      </h2>
+
+      <div class="post-meta">
+        <img
+          src=${post.author.avatar}
+          alt=${post.author.name}
+          class="author-avatar"
+        />
+        <span class="author-name">${post.author.name}</span>
+        <span class="separator">•</span>
+        <time datetime=${post.publishedAt}>
+          ${formatDate(post.publishedAt)}
+        </time>
+        <span class="separator">•</span>
+        <span>${post.readTime} min read</span>
+      </div>
+
+      <p class="post-excerpt">${post.excerpt}</p>
+
+      <div class="post-tags">
+        ${post.tags.map(tag => html`
+          <span class="tag">${tag}</span>
+        `)}
+      </div>
+    </article>
+  `
+
+  // Carrega posts
+  const page = pageState.get()
+  const data = postsLoader(page, pageSize)
+
+  // Re-render ao mudar de página
+  pageState.watch(() => {
+    // Trigger re-render
+  })
+
+  const handlePrevPage = () => {
+    if (page > 1) {
+      pageState.set(page - 1)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
+  const handleNextPage = () => {
+    if (data && data.hasMore) {
+      pageState.set(page + 1)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
+  if (!data) {
+    return html`
+      <div class="loading">
+        <p>Loading posts...</p>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="post-list">
+      <h1>Latest Posts</h1>
+
+      <div class="posts">
+        ${data.posts.map(renderPost)}
+      </div>
+
+      <div class="pagination">
+        <button
+          class="btn"
+          onclick=${handlePrevPage}
+          disabled=${page === 1}
+        >
+          Previous
+        </button>
+
+        <span class="page-info">
+          Page ${page} of ${Math.ceil(data.total / pageSize)}
+        </span>
+
+        <button
+          class="btn"
+          onclick=${handleNextPage}
+          disabled=${!data.hasMore}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  `
+}
+```
+
+## Componente Comments
+
+Sistema de comentários com submissão:
+
+```typescript title="src/shared/components/Comments.ts"
+import { html, type VNode, batch } from '@_bashell/slash'
+import { commentsLoader, newCommentState } from '../loaders/comments'
+import { invalidateLoader } from '@_bashell/slash'
+import type { Comment } from '../types'
+
+interface CommentsProps {
+  postId: string
+}
+
+export const Comments = ({ postId }: CommentsProps): VNode => {
+  const comments = commentsLoader(postId) || []
+  const formState = newCommentState.get()
+
+  const formatDate = (date: string): string => {
+    return new Date(date).toLocaleDateString('pt-BR', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  const handleSubmit = async (e: Event) => {
+    e.preventDefault()
+
+    batch(() => {
+      newCommentState.set({
+        ...formState,
+        isSubmitting: true
+      })
+    })
+
+    try {
+      const response = await fetch(`/api/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          author: formState.author,
+          content: formState.content
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to post comment')
+      }
+
+      // Limpa formulário e recarrega comentários
+      batch(() => {
+        newCommentState.set({
+          author: '',
+          content: '',
+          isSubmitting: false
+        })
+        invalidateLoader(commentsLoader, postId)
+      })
+    } catch (error) {
+      console.error('Error posting comment:', error)
+      newCommentState.set({
+        ...formState,
+        isSubmitting: false
+      })
+      alert('Failed to post comment. Please try again.')
+    }
+  }
+
+  const renderComment = (comment: Comment) => html`
+    <div class="comment">
+      <div class="comment-header">
+        <strong>${comment.author}</strong>
+        <time datetime=${comment.createdAt}>
+          ${formatDate(comment.createdAt)}
+        </time>
+      </div>
+      <p class="comment-content">${comment.content}</p>
+    </div>
+  `
+
+  return html`
+    <section class="comments-section">
+      <h3>Comments (${comments.length})</h3>
+
+      <div class="comments-list">
+        ${comments.length === 0
+          ? html`<p class="no-comments">No comments yet. Be the first!</p>`
+          : comments.map(renderComment)
+        }
+      </div>
+
+      <form class="comment-form" onsubmit=${handleSubmit}>
+        <h4>Leave a Comment</h4>
+
+        <div class="form-group">
+          <label for="author">Name</label>
+          <input
+            id="author"
+            type="text"
+            required
+            value=${formState.author}
+            oninput=${(e: Event) => {
+              const target = e.target as HTMLInputElement
+              newCommentState.set({ ...formState, author: target.value })
+            }}
+            disabled=${formState.isSubmitting}
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="content">Comment</label>
+          <textarea
+            id="content"
+            rows="4"
+            required
+            value=${formState.content}
+            oninput=${(e: Event) => {
+              const target = e.target as HTMLTextAreaElement
+              newCommentState.set({ ...formState, content: target.value })
+            }}
+            disabled=${formState.isSubmitting}
+          ></textarea>
+        </div>
+
+        <button
+          type="submit"
+          class="btn btn-primary"
+          disabled=${formState.isSubmitting}
+        >
+          ${formState.isSubmitting ? 'Posting...' : 'Post Comment'}
+        </button>
+      </form>
+    </section>
+  `
+}
+```
+
+## Componente PostDetail
+
+Visualização completa de um post:
+
+```typescript title="src/shared/components/PostDetail.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { postLoader } from '../loaders/posts'
+import { Comments } from './Comments'
+
+interface PostDetailProps {
+  slug: string
+}
+
+export const PostDetail = ({ slug }: PostDetailProps): VNode => {
+  const post = postLoader(slug)
+
+  if (!post) {
+    return html`
+      <div class="loading">
+        <p>Loading post...</p>
+      </div>
+    `
+  }
+
+  const formatDate = (date: string): string => {
+    return new Date(date).toLocaleDateString('pt-BR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+  }
+
+  return html`
+    <article class="post-detail">
+      <header class="post-header">
+        <h1>${post.title}</h1>
+
+        <div class="post-meta">
+          <img
+            src=${post.author.avatar}
+            alt=${post.author.name}
+            class="author-avatar-large"
+          />
+          <div>
+            <div class="author-name">${post.author.name}</div>
+            <div class="post-date">
+              <time datetime=${post.publishedAt}>
+                ${formatDate(post.publishedAt)}
+              </time>
+              <span class="separator">•</span>
+              <span>${post.readTime} min read</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="post-tags">
+          ${post.tags.map(tag => html`
+            <span class="tag">${tag}</span>
+          `)}
+        </div>
+      </header>
+
+      <div class="post-content">
+        ${html([post.content])}
+      </div>
+
+      <footer class="post-footer">
+        <a href="/" class="btn">← Back to posts</a>
+      </footer>
+
+      ${Comments({ postId: post.id })}
+    </article>
+  `
+}
+```
+
+<Aside type="caution">
+No exemplo acima, `${html([post.content])}` assume que o conteúdo já está em HTML. Em produção, use uma biblioteca de markdown-to-HTML e sanitize o output para prevenir XSS.
+</Aside>
+
+## Servidor HTTP
+
+Servidor Node.js com rotas e SSR:
+
+```typescript title="src/server/index.ts" {15-20}
+import http from 'node:http'
+import { renderToString, htmlString, setHydrateContext } from '@_bashell/slash'
+import { Layout } from '../shared/components/Layout'
+import { PostList } from '../shared/components/PostList'
+import { PostDetail } from '../shared/components/PostDetail'
+import { hydrateLoaderCache } from '@_bashell/slash'
+
+const PORT = process.env.PORT || 3000
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url!, `http://${req.headers.host}`)
+
+  // API routes
+  if (url.pathname.startsWith('/api/')) {
+    // Handle API routes (posts, comments)
+    // ... API implementation
+    return
+  }
+
+  // Static files
+  if (url.pathname.startsWith('/public/')) {
+    // Serve static files
+    return
+  }
+
+  // SSR routes
+  try {
+    let component: any
+    let title = 'My Blog'
+    let description = 'A blog built with Slash'
+
+    if (url.pathname === '/') {
+      component = PostList()
+      title = 'Latest Posts - My Blog'
+      description = 'Read the latest posts from our blog'
+    } else if (url.pathname.startsWith('/posts/')) {
+      const slug = url.pathname.split('/')[2]
+      component = PostDetail({ slug })
+      // Load post for meta tags
+      // title = post.title
+      // description = post.excerpt
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/html' })
+      res.end('<h1>404 Not Found</h1>')
+      return
+    }
+
+    // Renderiza componente
+    const app = Layout({ title, description, children: component })
+    const html = renderToString(app)
+
+    // Pega cache dos loaders para hidratação
+    const loaderCache = hydrateLoaderCache()
+
+    // Template HTML completo
+    const fullHtml = htmlString`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${title}</title>
+          <meta name="description" content="${description}" />
+          <link rel="stylesheet" href="/public/styles.css" />
+          <script>
+            window.__LOADER_CACHE__ = ${JSON.stringify(loaderCache)};
+          </script>
+        </head>
+        <body>
+          <div id="app">${html}</div>
+          <script type="module" src="/client/index.js"></script>
+        </body>
+      </html>
+    `
+
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(fullHtml)
+  } catch (error) {
+    console.error('SSR Error:', error)
+    res.writeHead(500, { 'Content-Type': 'text/html' })
+    res.end('<h1>500 Internal Server Error</h1>')
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`Server running at http://localhost:${PORT}`)
+})
+```
+
+## Cliente (Hidratação)
+
+Entry point do cliente que hidrata o HTML do servidor:
+
+```typescript title="src/client/index.ts"
+import { render, setHydrateContext } from '@_bashell/slash'
+import { Layout } from '../shared/components/Layout'
+import { PostList } from '../shared/components/PostList'
+import { PostDetail } from '../shared/components/PostDetail'
+
+// Restaura cache dos loaders
+const loaderCache = (window as any).__LOADER_CACHE__
+if (loaderCache) {
+  setHydrateContext(loaderCache)
+}
+
+// Detecta qual componente renderizar baseado na URL
+const path = window.location.pathname
+let component: any
+
+if (path === '/') {
+  component = PostList()
+} else if (path.startsWith('/posts/')) {
+  const slug = path.split('/')[2]
+  component = PostDetail({ slug })
+}
+
+// Hidrata o componente
+const root = document.getElementById('app')
+if (root && component) {
+  const app = Layout({
+    title: document.title,
+    description: '',
+    children: component
+  })
+
+  render(app, root)
+}
+```
+
+## Build Configuration
+
+<Tabs>
+  <TabItem label="package.json">
+  ```json
+  {
+    "name": "slash-blog-ssr",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+      "dev": "NODE_ENV=development tsx watch src/server/index.ts",
+      "build": "bun run build:client && bun run build:server",
+      "build:client": "esbuild src/client/index.ts --bundle --outfile=dist/public/client.js --format=esm",
+      "build:server": "esbuild src/server/index.ts --bundle --outfile=dist/server.js --platform=node --format=esm",
+      "start": "NODE_ENV=production node dist/server.js"
+    },
+    "dependencies": {
+      "@_bashell/slash": "latest"
+    },
+    "devDependencies": {
+      "@types/node": "^20.0.0",
+      "esbuild": "^0.19.0",
+      "tsx": "^4.0.0"
+    }
+  }
+  ```
+  </TabItem>
+
+  <TabItem label="tsconfig.json">
+  ```json
+  {
+    "compilerOptions": {
+      "target": "ES2022",
+      "module": "ESNext",
+      "moduleResolution": "bundler",
+      "lib": ["ES2022", "DOM"],
+      "strict": true,
+      "esModuleInterop": true,
+      "skipLibCheck": true,
+      "resolveJsonModule": true,
+      "isolatedModules": true,
+      "types": ["node"]
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist"]
+  }
+  ```
+  </TabItem>
+</Tabs>
+
+## Executando o Projeto
+
+```bash
+# Desenvolvimento
+bun run dev
+
+# Build para produção
+bun run build
+
+# Executar produção
+bun run start
+```
+
+## Otimizações de Performance
+
+### 1. Streaming SSR
+
+Para páginas grandes, use streaming:
+
+```typescript
+import { renderToStream } from '@_bashell/slash'
+
+// No servidor
+const stream = renderToStream(app)
+res.writeHead(200, { 'Content-Type': 'text/html' })
+stream.pipe(res)
+```
+
+### 2. Cache de Loaders
+
+Os loaders já têm cache embutido. Configure TTLs apropriados:
+
+```typescript
+createLoader(fetchFn, {
+  ttl: 10 * 60 * 1000, // 10 minutos para conteúdo estável
+  // ou
+  ttl: 30 * 1000,      // 30 segundos para conteúdo dinâmico
+})
+```
+
+### 3. Invalidação Seletiva
+
+Invalide apenas os loaders necessários:
+
+```typescript
+import { invalidateLoader } from '@_bashell/slash'
+
+// Após criar novo post
+invalidateLoader(postsLoader)
+
+// Após novo comentário, invalide apenas para aquele post
+invalidateLoader(commentsLoader, postId)
+```
+
+## SEO Best Practices
+
+1. **Meta Tags Dinâmicas**: Sempre defina title e description baseado no conteúdo
+2. **Open Graph**: Adicione meta tags OG para compartilhamento social
+3. **Structured Data**: Use JSON-LD para rich snippets
+4. **Sitemap**: Gere sitemap.xml automaticamente
+5. **Canonical URLs**: Previna conteúdo duplicado
+
+## Pontos-Chave de Aprendizado
+
+1. **SSR para SEO**: Conteúdo renderizado no servidor é indexável por crawlers
+2. **Hidratação**: O cliente "assume" o HTML do servidor sem re-render
+3. **Loaders Isomórficos**: Mesmo código funciona em servidor e cliente
+4. **Cache Compartilhado**: Estado hidratado evita fetches desnecessários
+5. **Performance**: SSR + streaming = Time to First Byte baixo
+
+## Próximos Passos
+
+- [SPA com Roteamento](/exemplos/spa-routing/) - Navegação client-side
+- [Data Fetching Patterns](/exemplos/data-fetching/) - Padrões avançados
+- [Server-Side Rendering](/avancado/ssr/) - Documentação detalhada de SSR

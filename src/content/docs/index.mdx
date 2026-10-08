@@ -1,0 +1,39 @@
+---
+title: Bem-vindo ao Slash
+description: Biblioteca reativa sem VDOM — htm + hyper + reactive state
+template: splash
+hero:
+  tagline: Biblioteca reativa moderna para construção de interfaces de usuário que elimina a necessidade de Virtual DOM
+  image:
+    file: ../../assets/houston.webp
+  actions:
+    - text: Começar
+      link: /intro/conceitos-core/
+      icon: right-arrow
+      variant: primary
+    - text: Ver no GitHub
+      link: https://github.com/bashell-rrocha/slash
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Próximos passos
+
+<CardGrid stagger>
+  <Card title="Conceitos Core" icon="open-book">
+    Entenda a filosofia e arquitetura do Slash
+  </Card>
+  <Card title="Instalação" icon="add-document">
+    Configure seu ambiente de desenvolvimento
+  </Card>
+  <Card title="Renderização" icon="pencil">
+    Aprenda a criar e renderizar elementos
+  </Card>
+  <Card title="Estado Reativo" icon="setting">
+    Domine o sistema de state management
+  </Card>
+  <Card title="Geração Estática (SSG)" icon="rocket">
+    Gere um site estático com imagens otimizadas e ilhas interativas
+  </Card>
+</CardGrid>
