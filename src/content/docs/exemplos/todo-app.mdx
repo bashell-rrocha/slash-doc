@@ -77,8 +77,8 @@ const loadState = (): TodoState => {
 
 // Cria estado reativo com histórico para debug
 export const todoState = createState<TodoState>(loadState(), {
-  history: true,
-  maxHistory: 50
+  enableHistory: true,
+  historyMaxSize: 50
 })
 
 // Salva no localStorage sempre que mudar
@@ -143,6 +143,9 @@ export const setFilter = (filter: Filter): void => {
   todoState.set({ ...state, filter })
 }
 
+// Item em edição (state próprio: só o item afetado precisa ler)
+export const editingId = createState<string | null>(null)
+
 // Computed values
 export const getFilteredTodos = (): Todo[] => {
   const state = todoState.get()
@@ -166,49 +169,45 @@ export const getCompletedCount = (): number => {
 ```
 
 <Aside type="tip">
-Usando `history: true` no estado, você pode debugar facilmente usando as ferramentas de desenvolvimento do navegador e até implementar undo/redo.
+Usando `enableHistory: true` no estado, você pode debugar facilmente usando as ferramentas de desenvolvimento do navegador e até implementar undo/redo.
 </Aside>
 
 ## Componente TodoItem
 
-Componente que representa cada tarefa individual:
+Componente que representa cada tarefa. O item lê `editingId` (state fora do componente) para alternar entre visualização e edição:
 
 ```typescript title="src/components/TodoItem.ts"
-import { html, type VNode } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
 import type { Todo } from '../types'
-import { toggleTodo, deleteTodo, editTodo } from '../state/todoState'
+import { toggleTodo, deleteTodo, editTodo, editingId } from '../state/todoState'
 
 interface TodoItemProps {
   todo: Todo
 }
 
-export const TodoItem = ({ todo }: TodoItemProps): VNode => {
-  let isEditing = false
-  let editInput: HTMLInputElement | null = null
+export const TodoItem = ({ todo }: TodoItemProps) => {
+  // Ler editingId aqui inscreve o item: ele re-renderiza ao entrar/sair da edição
+  const isEditing = editingId.get() === todo.id
 
   const handleEdit = () => {
-    isEditing = true
-    // Re-render será feito pelo watch no componente pai
+    editingId.set(todo.id)
+    // O <input> de edição só existe depois do re-render
     setTimeout(() => {
-      editInput?.focus()
-      editInput?.select()
+      const input = document.querySelector<HTMLInputElement>('.todo-item .edit')
+      input?.focus()
+      input?.select()
     }, 0)
   }
 
-  const handleSave = () => {
-    if (editInput && editInput.value.trim()) {
-      editTodo(todo.id, editInput.value)
-    }
-    isEditing = false
+  const handleSave = (e: Event) => {
+    const input = e.target as HTMLInputElement
+    if (input.value.trim()) editTodo(todo.id, input.value)
+    editingId.set(null)
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSave()
-    } else if (e.key === 'Escape') {
-      isEditing = false
-      // Re-render
-    }
+    if (e.key === 'Enter') handleSave(e)
+    else if (e.key === 'Escape') editingId.set(null)
   }
 
   return html`
@@ -219,14 +218,14 @@ export const TodoItem = ({ todo }: TodoItemProps): VNode => {
             class="toggle"
             type="checkbox"
             checked=${todo.completed}
-            onchange=${() => toggleTodo(todo.id)}
+            onChange=${() => toggleTodo(todo.id)}
           />
-          <label ondblclick=${handleEdit}>
+          <label onDblClick=${handleEdit}>
             ${todo.text}
           </label>
           <button
             class="destroy"
-            onclick=${() => deleteTodo(todo.id)}
+            onClick=${() => deleteTodo(todo.id)}
           >×</button>
         </div>
       ` : html`
@@ -234,9 +233,8 @@ export const TodoItem = ({ todo }: TodoItemProps): VNode => {
           class="edit"
           type="text"
           value=${todo.text}
-          onblur=${handleSave}
-          onkeydown=${handleKeyDown}
-          ref=${(el: HTMLInputElement) => { editInput = el }}
+          onBlur=${handleSave}
+          onKeyDown=${handleKeyDown}
         />
       `}
     </li>
@@ -249,11 +247,12 @@ export const TodoItem = ({ todo }: TodoItemProps): VNode => {
 Filtros para visualizar diferentes subconjuntos de tarefas:
 
 ```typescript title="src/components/TodoFilters.ts"
-import { html, type VNode } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
 import { todoState, setFilter, clearCompleted, getActiveCount, getCompletedCount } from '../state/todoState'
 import type { Filter } from '../types'
 
-export const TodoFilters = (): VNode => {
+export const TodoFilters = () => {
+  // Leia os states no topo: o componente re-renderiza quando o state muda
   const state = todoState.get()
   const activeCount = getActiveCount()
   const completedCount = getCompletedCount()
@@ -262,7 +261,7 @@ export const TodoFilters = (): VNode => {
     <li>
       <button
         class=${state.filter === filter ? 'selected' : ''}
-        onclick=${() => setFilter(filter)}
+        onClick=${() => setFilter(filter)}
       >
         ${label}
       </button>
@@ -285,7 +284,7 @@ export const TodoFilters = (): VNode => {
       ${completedCount > 0 ? html`
         <button
           class="clear-completed"
-          onclick=${clearCompleted}
+          onClick=${clearCompleted}
         >
           Clear completed
         </button>
@@ -297,73 +296,65 @@ export const TodoFilters = (): VNode => {
 
 ## Componente TodoApp
 
-Componente principal que coordena toda a aplicação:
+A aplicação é dividida em componentes pequenos, porque um componente re-renderiza por inteiro quando um state que ele leu muda. O campo de nova tarefa não lê nenhum state (não é recriado ao digitar), e só `TodoList` lê `todoState`:
 
 ```typescript title="src/components/TodoApp.ts"
-import { html, type VNode } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
 import { todoState, addTodo, getFilteredTodos } from '../state/todoState'
 import { TodoItem } from './TodoItem'
 import { TodoFilters } from './TodoFilters'
 
-export const TodoApp = (): VNode => {
-  let inputRef: HTMLInputElement | null = null
-
-  const handleSubmit = (e: Event) => {
-    e.preventDefault()
-    if (inputRef && inputRef.value.trim()) {
-      addTodo(inputRef.value)
-      inputRef.value = ''
-    }
-  }
-
+// Não lê states: o <input> nunca é recriado
+const NewTodo = () => {
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSubmit(e)
+    const input = e.target as HTMLInputElement
+    if (e.key === 'Enter' && input.value.trim()) {
+      addTodo(input.value)
+      input.value = ''
     }
   }
-
-  // Re-render quando o estado mudar
-  let container: HTMLElement | null = null
-
-  todoState.watch(() => {
-    if (container) {
-      const newVNode = TodoApp()
-      container.replaceWith(newVNode as any)
-    }
-  })
-
-  const filteredTodos = getFilteredTodos()
-  const state = todoState.get()
 
   return html`
-    <section class="todoapp" ref=${(el: HTMLElement) => { container = el }}>
-      <header class="header">
-        <h1>todos</h1>
-        <input
-          class="new-todo"
-          placeholder="What needs to be done?"
-          ref=${(el: HTMLInputElement) => { inputRef = el }}
-          onkeydown=${handleKeyDown}
-          autofocus
-        />
-      </header>
-
-      ${state.todos.length > 0 ? html`
-        <section class="main">
-          <ul class="todo-list">
-            ${filteredTodos.map(todo => TodoItem({ todo }))}
-          </ul>
-        </section>
-
-        ${TodoFilters()}
-      ` : null}
-    </section>
+    <input
+      class="new-todo"
+      placeholder="What needs to be done?"
+      onKeyDown=${handleKeyDown}
+      autofocus
+    />
   `
 }
+
+const TodoList = () => {
+  const state = todoState.get()
+  const filteredTodos = getFilteredTodos()
+
+  if (state.todos.length === 0) return null
+
+  return html`
+    <section class="main">
+      <ul class="todo-list">
+        ${filteredTodos.map(todo => html`<${TodoItem} todo=${todo} />`)}
+      </ul>
+    </section>
+
+    <${TodoFilters} />
+  `
+}
+
+export const TodoApp = () => html`
+  <section class="todoapp">
+    <header class="header">
+      <h1>todos</h1>
+      <${NewTodo} />
+    </header>
+
+    <${TodoList} />
+  </section>
+`
 ```
 
 <Aside type="note">
-O padrão usado aqui é re-renderizar toda a app quando o estado muda. Para apps maiores, você pode otimizar usando `batch()` e renderização mais granular.
+A reatividade é por componente: ao mudar `todoState`, `TodoList` (que leu o state) executa de novo e substitui seus nós. Dividir a interface em componentes pequenos limita o que re-renderiza. Para atualizar vários states de uma vez use `batch()`.
 </Aside>
 
 ## Entry Point
@@ -371,14 +362,14 @@ O padrão usado aqui é re-renderizar toda a app quando o estado muda. Para apps
 Montamos a aplicação no DOM:
 
 ```typescript title="src/index.ts"
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { TodoApp } from './components/TodoApp'
 import './styles.css'
 
-// Render app
+// Monte como <${TodoApp} />
 const root = document.getElementById('app')
 if (root) {
-  render(TodoApp(), root)
+  render(html`<${TodoApp} />`, root)
 }
 ```
 
