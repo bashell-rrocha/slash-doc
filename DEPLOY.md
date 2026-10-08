@@ -47,7 +47,7 @@ Na primeira execução, o Wrangler vai:
 2. Fazer o deploy inicial
 3. Te dar uma URL tipo: `https://slash-docs.pages.dev`
 
-## Configurar Custom Domain (ezbug.dev)
+## Configurar Custom Domain (bashell.com.br)
 
 Após o primeiro deploy:
 
@@ -57,14 +57,14 @@ Após o primeiro deploy:
 2. Vá em **Workers & Pages** > **slash-docs**
 3. Clique na aba **Custom domains**
 4. Clique em **Set up a custom domain**
-5. Digite: `slash.ezbug.dev`
+5. Digite: `slash.bashell.com.br`
 6. Cloudflare vai te mostrar os registros DNS necessários
 
 ### 2. No Google Workspace (Admin Console)
 
 1. Acesse: https://admin.google.com
 2. Vá em **Domains** > **Manage domains**
-3. Clique em **ezbug.dev**
+3. Clique em **bashell.com.br**
 4. Vá em **DNS** > **Custom resource records**
 5. Adicione o registro CNAME:
    ```
@@ -77,7 +77,7 @@ Após o primeiro deploy:
 ### 3. Aguarde propagação DNS
 
 - Pode levar de 5 minutos a 48 horas (geralmente ~15 minutos)
-- Teste com: `dig slash.ezbug.dev`
+- Teste com: `dig slash.bashell.com.br`
 - O SSL será provisionado automaticamente pelo Cloudflare
 
 ## Deploy automático via Git (Opcional)
@@ -101,7 +101,7 @@ Para deploy automático a cada push:
 
 Após deploy bem-sucedido:
 - URL temporária: https://slash-docs.pages.dev
-- URL custom (após DNS): https://slash.ezbug.dev
+- URL custom (após DNS): https://slash.bashell.com.br
 
 ## Troubleshooting
 
