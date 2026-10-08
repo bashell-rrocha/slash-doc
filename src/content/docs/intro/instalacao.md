@@ -192,13 +192,14 @@ console.log(`Server running at http://localhost:${server.port}`)
 #### src/client.ts
 
 ```typescript
-import { render } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
 import { App } from './App'
 
 const root = document.getElementById('app')
 if (root) {
-  // Hydrate existing DOM from server
-  render(App(), root)
+  // Com HTML do servidor + script __SLASH_STATE__ na página, render() limpa o container
+  // e renderiza no cliente (veja Hydration)
+  render(html`<${App} />`, root)
 }
 ```
 

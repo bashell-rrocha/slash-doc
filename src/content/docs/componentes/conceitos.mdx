@@ -301,6 +301,12 @@ const formState = createState({
   }
 })
 
+// Mensagens de erro: único componente que lê `errors`
+const FieldError = ({ field }: { field: 'name' | 'email' }) => {
+  const message = formState.get().errors[field]
+  return html`${message && html`<span class="error">${message}</span>`}`
+}
+
 function UserForm() {
   const validate = () => {
     const state = formState.get()
@@ -329,42 +335,31 @@ function UserForm() {
     }
   }
 
+  // O form não lê states no render: os <input> não são recriados ao digitar
   return html`
     <form onSubmit=${handleSubmit}>
       <div>
         <input
           type="text"
           placeholder="Nome"
-          value=${formState.get().name}
           onInput=${(e: Event) => {
             const state = formState.get()
-            formState.set({
-              ...state,
-              name: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, name: '' }
-            })
+            formState.set({ ...state, name: (e.target as HTMLInputElement).value })
           }}
         />
-        ${formState.get().errors.name &&
-          html`<span class="error">${formState.get().errors.name}</span>`}
+        <${FieldError} field="name" />
       </div>
 
       <div>
         <input
           type="email"
           placeholder="Email"
-          value=${formState.get().email}
           onInput=${(e: Event) => {
             const state = formState.get()
-            formState.set({
-              ...state,
-              email: (e.target as HTMLInputElement).value,
-              errors: { ...state.errors, email: '' }
-            })
+            formState.set({ ...state, email: (e.target as HTMLInputElement).value })
           }}
         />
-        ${formState.get().errors.email &&
-          html`<span class="error">${formState.get().errors.email}</span>`}
+        <${FieldError} field="email" />
       </div>
 
       <button type="submit">Enviar</button>
@@ -373,12 +368,12 @@ function UserForm() {
 }
 ```
 
-<Aside type="caution">
-`UserForm` lê `formState` no render, então re-renderiza (e recria os `<input>`) a cada `set`. Para campos de texto, leia o state só dentro dos handlers e isole as partes que mudam (como as mensagens de erro) em componentes menores, montados com `<${Mensagem} />`. Veja o exemplo de formulário em [Renderização](/fundamentos/renderizacao/).
+<Aside type="note">
+Um componente que lê `formState` no render re-renderiza (e recria os `<input>`) a cada `set`. Por isso o formulário só lê o state dentro dos handlers, e as partes que mudam (mensagens de erro) ficam em componentes menores, montados com `<${FieldError} />`. Veja [Formulários](/formularios/conceitos/).
 </Aside>
 
 ## Próximos passos
 
 - [Lifecycle e Cleanup](/componentes/lifecycle/) - Gerenciando recursos e limpeza
 - [Roteamento](/roteamento/conceitos/) - Criando SPAs com router
-- [Formulários](/formularios/validacao/) - Trabalhando com forms e validação
+- [Formulários](/formularios/conceitos/) - Trabalhando com forms e validação

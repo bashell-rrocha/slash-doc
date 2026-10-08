@@ -295,20 +295,18 @@ render(html`<div>Second</div>`, root)
 
 #### Hidratação SSR
 
-Se o container já tem conteúdo renderizado pelo servidor E existe um `<script id="__SLASH_STATE__">`, `render()` hidrata em vez de substituir:
+Se o container já tem conteúdo renderizado pelo servidor E existe um `<script id="__SLASH_STATE__">`, `render()` lê o JSON do script, remove o script, **limpa o container** e renderiza a view no cliente. O DOM do servidor não é reaproveitado e o estado do JSON não é aplicado aos seus states (veja [Hydration](/avancado/hydration/)):
 
 ```typescript
 // Server-side
-const html = renderToString(App())
+const { html, state } = renderToString(() => App())
 const output = `
   <div id="app">${html}</div>
-  <script id="__SLASH_STATE__" type="application/json">
-    ${JSON.stringify(stateData)}
-  </script>
+  <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
 `
 
-// Client-side
-render(App(), '#app') // Hidrata DOM existente
+// Client-side: substitui o HTML do servidor por nós renderizados no cliente
+render(html`<${App} />`, '#app')
 ```
 
 #### Erro Handling
