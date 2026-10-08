@@ -1,0 +1,508 @@
+---
+title: Navigation Guards
+description: Controle de acesso e proteção de rotas com guards de navegação
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+## O que são Navigation Guards?
+
+Navigation Guards são **funções que interceptam navegações** antes que elas aconteçam. Você pode usá-los para:
+
+- ✅ **Autenticação**: Proteger rotas que exigem login
+- ✅ **Autorização**: Verificar permissões do usuário
+- ✅ **Validação**: Confirmar se dados necessários existem
+- ✅ **Redirecionamento**: Enviar usuários para outras rotas
+- ✅ **Confirmação**: Perguntar antes de sair de uma página (ex: formulário não salvo)
+- ✅ **Analytics**: Registrar navegações
+
+## Assinatura de um Guard
+
+```typescript
+type NavigationGuard = (
+  to: RouteMatch,    // Rota de destino
+  from: RouteMatch | null  // Rota atual (null se primeira navegação)
+) => void | boolean | string | Promise<void | boolean | string>
+```
+
+### Valores de retorno
+
+| Retorno | Comportamento |
+|---------|---------------|
+| `void` ou `true` | **Permite** a navegação |
+| `false` | **Bloqueia** a navegação |
+| `string` | **Redireciona** para o path retornado |
+| `Promise<...>` | Aguarda resolução e aplica a regra acima |
+
+<Aside type="note">
+Guards são executados em **sequência**. Se um guard bloquear ou redirecionar, os próximos não serão executados.
+</Aside>
+
+## Guards globais
+
+Guards globais são aplicados a **todas as rotas**:
+
+```typescript
+import { createRouter } from '@_bashell/slash'
+
+const router = createRouter({
+  routes: [
+    { path: '/', component: Home },
+    { path: '/dashboard', component: Dashboard }
+  ],
+  guards: [
+    // Guard global: verificar autenticação
+    async (to, from) => {
+      const isAuthenticated = await checkAuth()
+
+      if (!isAuthenticated && to.path !== '/login') {
+        console.log('Usuário não autenticado, redirecionando...')
+        return '/login'
+      }
+
+      // Permitir navegação
+      return true
+    }
+  ]
+})
+```
+
+## Guards por rota
+
+Guards específicos aplicam-se apenas à rota onde foram definidos:
+
+```typescript
+import { createRouter } from '@_bashell/slash'
+
+const router = createRouter({
+  routes: [
+    {
+      path: '/',
+      component: Home
+    },
+    {
+      path: '/admin',
+      component: AdminPanel,
+      guards: [
+        // Guard específico: verificar se é admin
+        async (to, from) => {
+          const user = await getCurrentUser()
+
+          if (!user || !user.isAdmin) {
+            console.log('Acesso negado: não é admin')
+            return '/' // Redirecionar para home
+          }
+
+          return true
+        }
+      ]
+    },
+    {
+      path: '/settings',
+      component: Settings,
+      guards: [
+        // Guard de confirmação
+        (to, from) => {
+          if (from && hasUnsavedChanges()) {
+            const confirmed = confirm('Você tem alterações não salvas. Deseja sair?')
+            return confirmed // true permite, false bloqueia
+          }
+          return true
+        }
+      ]
+    }
+  ]
+})
+```
+
+## Ordem de execução
+
+Guards são executados nesta ordem:
+
+1. **Guards globais** (definidos em `RouterConfig.guards`)
+2. **Guards da rota** (definidos em `RouteConfig.guards`)
+
+Se qualquer guard bloquear ou redirecionar, os próximos não executam.
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/protected',
+      component: ProtectedPage,
+      guards: [
+        // 2️⃣ Executa depois do guard global
+        (to, from) => {
+          console.log('Guard da rota executando...')
+          return true
+        }
+      ]
+    }
+  ],
+  guards: [
+    // 1️⃣ Executa primeiro
+    (to, from) => {
+      console.log('Guard global executando...')
+      return true
+    }
+  ]
+})
+```
+
+## Exemplos práticos
+
+### Autenticação simples
+
+```typescript
+import { createRouter } from '@_bashell/slash'
+
+// Simulação de auth
+let isLoggedIn = false
+
+function login() {
+  isLoggedIn = true
+}
+
+function logout() {
+  isLoggedIn = false
+}
+
+const router = createRouter({
+  routes: [
+    {
+      path: '/',
+      component: () => html`<h1>Home</h1>`
+    },
+    {
+      path: '/login',
+      component: () => html`
+        <div>
+          <h1>Login</h1>
+          <button onClick=${() => {
+            login()
+            router.push('/dashboard')
+          }}>
+            Entrar
+          </button>
+        </div>
+      `
+    },
+    {
+      path: '/dashboard',
+      component: () => html`
+        <div>
+          <h1>Dashboard</h1>
+          <button onClick=${() => {
+            logout()
+            router.push('/')
+          }}>
+            Sair
+          </button>
+        </div>
+      `,
+      guards: [
+        (to, from) => {
+          if (!isLoggedIn) {
+            return '/login'
+          }
+          return true
+        }
+      ]
+    }
+  ]
+})
+```
+
+### Verificação de permissões
+
+```typescript
+type User = {
+  id: number
+  name: string
+  role: 'admin' | 'user' | 'guest'
+}
+
+let currentUser: User | null = null
+
+const requireRole = (requiredRole: User['role']) => {
+  return (to: RouteMatch, from: RouteMatch | null) => {
+    if (!currentUser) {
+      return '/login'
+    }
+
+    if (currentUser.role !== requiredRole) {
+      console.warn(`Acesso negado: requer role ${requiredRole}`)
+      return '/'
+    }
+
+    return true
+  }
+}
+
+const router = createRouter({
+  routes: [
+    {
+      path: '/admin',
+      component: AdminPanel,
+      guards: [requireRole('admin')]
+    },
+    {
+      path: '/user-profile',
+      component: UserProfile,
+      guards: [requireRole('user')]
+    }
+  ]
+})
+```
+
+### Carregar dados antes da navegação
+
+```typescript
+import { createRouter } from '@_bashell/slash'
+import { createState } from '@_bashell/slash'
+
+const userData = createState<any>(null)
+
+const router = createRouter({
+  routes: [
+    {
+      path: '/profile/:id',
+      component: (state) => {
+        const user = userData.get()
+
+        if (!user) {
+          return html`<p>Carregando...</p>`
+        }
+
+        return html`
+          <div>
+            <h1>${user.name}</h1>
+            <p>${user.email}</p>
+          </div>
+        `
+      },
+      guards: [
+        async (to, from) => {
+          const userId = to.params.id
+
+          try {
+            // Carregar dados do usuário antes de navegar
+            const response = await fetch(`/api/users/${userId}`)
+            const user = await response.json()
+
+            userData.set(user)
+            return true // Permitir navegação
+          } catch (error) {
+            console.error('Erro ao carregar usuário:', error)
+            return '/' // Redirecionar para home em caso de erro
+          }
+        }
+      ]
+    }
+  ]
+})
+```
+
+<Aside type="caution">
+Carregar dados em guards pode deixar a navegação mais lenta. Considere usar loaders ou carregar dados no componente para melhor UX.
+</Aside>
+
+### Analytics e tracking
+
+```typescript
+const router = createRouter({
+  routes: [
+    { path: '/', component: Home },
+    { path: '/about', component: About }
+  ],
+  guards: [
+    // Guard global para analytics
+    (to, from) => {
+      // Enviar evento de pageview
+      if (typeof gtag !== 'undefined') {
+        gtag('config', 'GA_MEASUREMENT_ID', {
+          page_path: to.path
+        })
+      }
+
+      console.log('Navegação:', {
+        from: from?.path || 'inicial',
+        to: to.path,
+        params: to.params,
+        query: to.query
+      })
+
+      // Sempre permitir navegação
+      return true
+    }
+  ]
+})
+```
+
+### Confirmação de saída (unsaved changes)
+
+```typescript
+import { createState } from '@_bashell/slash'
+
+const hasUnsavedChanges = createState(false)
+
+function Editor({ router }) {
+  const content = createState('')
+
+  const handleInput = (e: Event) => {
+    content.set((e.target as HTMLTextAreaElement).value)
+    hasUnsavedChanges.set(true)
+  }
+
+  const handleSave = () => {
+    // Salvar conteúdo...
+    hasUnsavedChanges.set(false)
+    console.log('Conteúdo salvo!')
+  }
+
+  return html`
+    <div>
+      <h1>Editor</h1>
+      <textarea onInput=${handleInput}>${content}</textarea>
+      <button onClick=${handleSave}>Salvar</button>
+    </div>
+  `
+}
+
+const router = createRouter({
+  routes: [
+    {
+      path: '/editor',
+      component: Editor,
+      guards: [
+        (to, from) => {
+          // Guard de saída: confirmar se há mudanças não salvas
+          if (from && from.path === '/editor' && hasUnsavedChanges.get()) {
+            const confirmed = confirm(
+              'Você tem alterações não salvas. Deseja sair mesmo assim?'
+            )
+            return confirmed
+          }
+          return true
+        }
+      ]
+    }
+  ]
+})
+```
+
+## Guards assíncronos
+
+Guards podem ser assíncronos para fazer verificações que dependem de I/O:
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/premium',
+      component: PremiumContent,
+      guards: [
+        async (to, from) => {
+          // Verificar status de assinatura no servidor
+          const response = await fetch('/api/subscription/status')
+          const { isPremium } = await response.json()
+
+          if (!isPremium) {
+            return '/upgrade' // Redirecionar para página de upgrade
+          }
+
+          return true
+        }
+      ]
+    }
+  ]
+})
+```
+
+## Tratamento de erros
+
+Se um guard lançar um erro, a navegação é **bloqueada**:
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/dashboard',
+      component: Dashboard,
+      guards: [
+        async (to, from) => {
+          try {
+            const user = await fetchCurrentUser()
+            return !!user
+          } catch (error) {
+            console.error('Erro no guard:', error)
+            // Erro = navegação bloqueada
+            // Se quiser redirecionar em caso de erro, use return '/error'
+            return false
+          }
+        }
+      ]
+    }
+  ]
+})
+```
+
+## Metadados e guards
+
+Você pode usar metadados de rota (`meta`) para controle declarativo:
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/',
+      component: Home,
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/dashboard',
+      component: Dashboard,
+      meta: { requiresAuth: true, requiredRole: 'user' }
+    },
+    {
+      path: '/admin',
+      component: AdminPanel,
+      meta: { requiresAuth: true, requiredRole: 'admin' }
+    }
+  ],
+  guards: [
+    // Guard global que lê metadata
+    (to, from) => {
+      const { requiresAuth, requiredRole } = to.meta
+
+      if (requiresAuth && !isLoggedIn()) {
+        return '/login'
+      }
+
+      if (requiredRole && !hasRole(requiredRole)) {
+        return '/'
+      }
+
+      return true
+    }
+  ]
+})
+```
+
+<Aside type="tip">
+Usar metadados torna seus guards mais **declarativos** e **reutilizáveis**, centralizando a lógica de proteção de rotas.
+</Aside>
+
+## Best practices
+
+1. **Mantenha guards simples**: Lógica complexa deve estar em serviços/helpers
+2. **Use metadados**: Prefira metadados + guard global ao invés de guards duplicados
+3. **Trate erros**: Sempre use try/catch em guards assíncronos
+4. **Evite side effects**: Guards devem ser funções puras quando possível
+5. **Documente comportamento**: Deixe claro o que cada guard faz e por que
+
+## Próximos passos
+
+- [Roteamento Básico](/roteamento/conceitos/) - Conceitos fundamentais de roteamento
+- [Rotas Aninhadas](/roteamento/nested/) - Estrutura hierárquica de rotas
+- [SSR com Router](/ssr/roteamento/) - Guards no servidor

@@ -1,0 +1,827 @@
+---
+title: Form Validation Real-World
+description: Exemplo prático de validação avançada de formulários com Slash
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+# Form Validation Real-World
+
+Este exemplo demonstra como criar um sistema completo de validação de formulários usando Slash. Você aprenderá sobre validação síncrona e assíncrona, mensagens de erro customizadas, validação em tempo real e UX patterns modernos.
+
+## Funcionalidades
+
+- ✅ Validação síncrona e assíncrona
+- ✅ Validação em tempo real (on blur, on change)
+- ✅ Mensagens de erro customizadas
+- ✅ Validação de campo único e cross-field
+- ✅ Validação de email, senha forte, CEP, etc
+- ✅ Integração com APIs (validação de username único)
+- ✅ Feedback visual imediato
+- ✅ Acessibilidade (ARIA)
+- ✅ TypeScript com tipos seguros
+
+## Estrutura do Projeto
+
+```
+src/
+├── index.ts              # Entry point
+├── components/
+│   ├── SignupForm.ts     # Formulário de cadastro
+│   ├── AddressForm.ts    # Formulário de endereço
+│   └── PaymentForm.ts    # Formulário de pagamento
+├── validation/
+│   ├── validators.ts     # Validadores reutilizáveis
+│   ├── rules.ts          # Regras de validação
+│   └── async.ts          # Validadores assíncronos
+├── utils/
+│   └── formatting.ts     # Formatação de inputs
+└── types.ts              # Tipos
+```
+
+## Tipos TypeScript
+
+```typescript title="src/types.ts"
+export interface ValidationRule<T = any> {
+  validate: (value: T, formData?: any) => boolean | Promise<boolean>
+  message: string | ((value: T) => string)
+}
+
+export interface FieldState {
+  value: any
+  error: string | null
+  touched: boolean
+  validating: boolean
+}
+
+export interface FormState<T = any> {
+  fields: Record<keyof T, FieldState>
+  isValid: boolean
+  isSubmitting: boolean
+  submitCount: number
+}
+
+export interface SignupData {
+  username: string
+  email: string
+  password: string
+  confirmPassword: string
+  age: number
+  terms: boolean
+}
+
+export interface AddressData {
+  cep: string
+  street: string
+  number: string
+  complement: string
+  city: string
+  state: string
+}
+```
+
+## Validadores Reutilizáveis
+
+```typescript title="src/validation/validators.ts"
+import type { ValidationRule } from '../types'
+
+// Required field
+export const required = (message = 'This field is required'): ValidationRule => ({
+  validate: (value) => {
+    if (typeof value === 'string') return value.trim().length > 0
+    if (typeof value === 'boolean') return value === true
+    if (typeof value === 'number') return !isNaN(value)
+    return value != null
+  },
+  message
+})
+
+// Min length
+export const minLength = (min: number): ValidationRule => ({
+  validate: (value: string) => value.length >= min,
+  message: `Must be at least ${min} characters`
+})
+
+// Max length
+export const maxLength = (max: number): ValidationRule => ({
+  validate: (value: string) => value.length <= max,
+  message: `Must be at most ${max} characters`
+})
+
+// Email validation
+export const email = (): ValidationRule => ({
+  validate: (value: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(value)
+  },
+  message: 'Invalid email address'
+})
+
+// Password strength
+export const strongPassword = (): ValidationRule => ({
+  validate: (value: string) => {
+    // At least 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/
+    return regex.test(value)
+  },
+  message: 'Password must be at least 8 characters with uppercase, lowercase, number and special character'
+})
+
+// Min/Max value
+export const min = (minValue: number): ValidationRule => ({
+  validate: (value: number) => value >= minValue,
+  message: `Must be at least ${minValue}`
+})
+
+export const max = (maxValue: number): ValidationRule => ({
+  validate: (value: number) => value <= maxValue,
+  message: `Must be at most ${maxValue}`
+})
+
+// Pattern matching
+export const pattern = (regex: RegExp, message: string): ValidationRule => ({
+  validate: (value: string) => regex.test(value),
+  message
+})
+
+// Matches another field
+export const matches = (fieldName: string, label: string): ValidationRule => ({
+  validate: (value: string, formData: any) => {
+    return value === formData[fieldName]
+  },
+  message: `Must match ${label}`
+})
+
+// CEP brasileiro
+export const cep = (): ValidationRule => ({
+  validate: (value: string) => {
+    const cleaned = value.replace(/\D/g, '')
+    return cleaned.length === 8
+  },
+  message: 'Invalid CEP format'
+})
+
+// CPF brasileiro
+export const cpf = (): ValidationRule => ({
+  validate: (value: string) => {
+    const cleaned = value.replace(/\D/g, '')
+    if (cleaned.length !== 11) return false
+
+    // Validação de CPF
+    let sum = 0
+    let remainder
+
+    for (let i = 1; i <= 9; i++) {
+      sum += parseInt(cleaned.substring(i - 1, i)) * (11 - i)
+    }
+    remainder = (sum * 10) % 11
+    if (remainder === 10 || remainder === 11) remainder = 0
+    if (remainder !== parseInt(cleaned.substring(9, 10))) return false
+
+    sum = 0
+    for (let i = 1; i <= 10; i++) {
+      sum += parseInt(cleaned.substring(i - 1, i)) * (12 - i)
+    }
+    remainder = (sum * 10) % 11
+    if (remainder === 10 || remainder === 11) remainder = 0
+    if (remainder !== parseInt(cleaned.substring(10, 11))) return false
+
+    return true
+  },
+  message: 'Invalid CPF'
+})
+
+// Credit card number (Luhn algorithm)
+export const creditCard = (): ValidationRule => ({
+  validate: (value: string) => {
+    const cleaned = value.replace(/\D/g, '')
+    if (cleaned.length < 13 || cleaned.length > 19) return false
+
+    let sum = 0
+    let isEven = false
+
+    for (let i = cleaned.length - 1; i >= 0; i--) {
+      let digit = parseInt(cleaned.charAt(i))
+
+      if (isEven) {
+        digit *= 2
+        if (digit > 9) digit -= 9
+      }
+
+      sum += digit
+      isEven = !isEven
+    }
+
+    return sum % 10 === 0
+  },
+  message: 'Invalid credit card number'
+})
+```
+
+## Validadores Assíncronos
+
+```typescript title="src/validation/async.ts"
+import type { ValidationRule } from '../types'
+
+// Check if username is available
+export const uniqueUsername = (): ValidationRule<string> => ({
+  validate: async (value: string) => {
+    if (value.length < 3) return true // Skip if too short
+
+    // Simula chamada API
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    // Mock: usernames que já existem
+    const takenUsernames = ['admin', 'user', 'test', 'johndoe']
+    return !takenUsernames.includes(value.toLowerCase())
+  },
+  message: 'Username is already taken'
+})
+
+// Check if email is available
+export const uniqueEmail = (): ValidationRule<string> => ({
+  validate: async (value: string) => {
+    // Valida formato primeiro
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(value)) return true // Deixa outra validação tratar
+
+    // Simula chamada API
+    await new Promise(resolve => setTimeout(resolve, 700))
+
+    // Mock
+    const takenEmails = ['admin@example.com', 'test@example.com']
+    return !takenEmails.includes(value.toLowerCase())
+  },
+  message: 'Email is already registered'
+})
+
+// Validate CEP with API
+export const validCep = (): ValidationRule<string> => ({
+  validate: async (value: string) => {
+    const cleaned = value.replace(/\D/g, '')
+    if (cleaned.length !== 8) return true // Deixa outra validação tratar
+
+    try {
+      // Simula chamada à API ViaCEP
+      await new Promise(resolve => setTimeout(resolve, 400))
+
+      // Mock: CEPs válidos
+      const validCeps = ['01310100', '20040020', '30130100']
+      return validCeps.includes(cleaned)
+    } catch (error) {
+      return false
+    }
+  },
+  message: 'CEP not found'
+})
+```
+
+## Sistema de Validação
+
+```typescript title="src/validation/form-validator.ts"
+import { createState, batch } from '@_bashell/slash'
+import type { ValidationRule, FormState, FieldState } from '../types'
+
+export class FormValidator<T extends Record<string, any>> {
+  private rules: Partial<Record<keyof T, ValidationRule[]>> = {}
+  private formState: ReturnType<typeof createState<FormState<T>>>
+
+  constructor(initialValues: T) {
+    // Inicializa estado do formulário
+    const fields = Object.keys(initialValues).reduce((acc, key) => {
+      acc[key as keyof T] = {
+        value: initialValues[key as keyof T],
+        error: null,
+        touched: false,
+        validating: false
+      }
+      return acc
+    }, {} as Record<keyof T, FieldState>)
+
+    this.formState = createState<FormState<T>>({
+      fields,
+      isValid: false,
+      isSubmitting: false,
+      submitCount: 0
+    })
+  }
+
+  // Adiciona regras de validação para um campo
+  addRules(field: keyof T, rules: ValidationRule[]): void {
+    this.rules[field] = rules
+  }
+
+  // Valida um campo específico
+  async validateField(field: keyof T): Promise<boolean> {
+    const state = this.formState.get()
+    const fieldState = state.fields[field]
+    const rules = this.rules[field] || []
+
+    if (rules.length === 0) return true
+
+    // Marca como validating
+    this.updateFieldState(field, { validating: true })
+
+    let error: string | null = null
+
+    // Executa validações sequencialmente
+    for (const rule of rules) {
+      const isValid = await rule.validate(
+        fieldState.value,
+        this.getValues()
+      )
+
+      if (!isValid) {
+        error = typeof rule.message === 'function'
+          ? rule.message(fieldState.value)
+          : rule.message
+        break
+      }
+    }
+
+    // Atualiza estado
+    this.updateFieldState(field, {
+      error,
+      validating: false
+    })
+
+    return error === null
+  }
+
+  // Valida todos os campos
+  async validateAll(): Promise<boolean> {
+    const fields = Object.keys(this.rules) as (keyof T)[]
+    const results = await Promise.all(
+      fields.map(field => this.validateField(field))
+    )
+
+    const isValid = results.every(result => result === true)
+
+    this.formState.set({
+      ...this.formState.get(),
+      isValid
+    })
+
+    return isValid
+  }
+
+  // Atualiza valor de um campo
+  setValue(field: keyof T, value: any): void {
+    this.updateFieldState(field, { value })
+  }
+
+  // Marca campo como touched
+  setTouched(field: keyof T, touched = true): void {
+    this.updateFieldState(field, { touched })
+  }
+
+  // Pega valores atuais de todos os campos
+  getValues(): T {
+    const state = this.formState.get()
+    return Object.keys(state.fields).reduce((acc, key) => {
+      acc[key as keyof T] = state.fields[key as keyof T].value
+      return acc
+    }, {} as T)
+  }
+
+  // Pega estado de um campo
+  getFieldState(field: keyof T): FieldState {
+    return this.formState.get().fields[field]
+  }
+
+  // Pega estado completo do form
+  getState(): FormState<T> {
+    return this.formState.get()
+  }
+
+  // Watch state changes
+  watch(callback: (state: FormState<T>) => void): void {
+    this.formState.watch(callback)
+  }
+
+  // Reset form
+  reset(values?: T): void {
+    const state = this.formState.get()
+    const fields = Object.keys(state.fields).reduce((acc, key) => {
+      acc[key as keyof T] = {
+        value: values ? values[key as keyof T] : '',
+        error: null,
+        touched: false,
+        validating: false
+      }
+      return acc
+    }, {} as Record<keyof T, FieldState>)
+
+    this.formState.set({
+      fields,
+      isValid: false,
+      isSubmitting: false,
+      submitCount: 0
+    })
+  }
+
+  // Helper privado para atualizar campo
+  private updateFieldState(field: keyof T, updates: Partial<FieldState>): void {
+    const state = this.formState.get()
+    batch(() => {
+      this.formState.set({
+        ...state,
+        fields: {
+          ...state.fields,
+          [field]: {
+            ...state.fields[field],
+            ...updates
+          }
+        }
+      })
+    })
+  }
+
+  // Marca form como submitting
+  setSubmitting(isSubmitting: boolean): void {
+    const state = this.formState.get()
+    this.formState.set({
+      ...state,
+      isSubmitting,
+      submitCount: isSubmitting ? state.submitCount : state.submitCount + 1
+    })
+  }
+}
+```
+
+## Componente SignupForm
+
+Formulário completo de cadastro:
+
+```typescript title="src/components/SignupForm.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { FormValidator } from '../validation/form-validator'
+import {
+  required,
+  minLength,
+  maxLength,
+  email,
+  strongPassword,
+  matches,
+  min,
+  max
+} from '../validation/validators'
+import { uniqueUsername, uniqueEmail } from '../validation/async'
+import type { SignupData } from '../types'
+
+export const SignupForm = (): VNode => {
+  // Cria validador
+  const validator = new FormValidator<SignupData>({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    age: 18,
+    terms: false
+  })
+
+  // Define regras de validação
+  validator.addRules('username', [
+    required('Username is required'),
+    minLength(3),
+    maxLength(20),
+    uniqueUsername()
+  ])
+
+  validator.addRules('email', [
+    required('Email is required'),
+    email(),
+    uniqueEmail()
+  ])
+
+  validator.addRules('password', [
+    required('Password is required'),
+    strongPassword()
+  ])
+
+  validator.addRules('confirmPassword', [
+    required('Please confirm your password'),
+    matches('password', 'Password')
+  ])
+
+  validator.addRules('age', [
+    required('Age is required'),
+    min(18),
+    max(120)
+  ])
+
+  validator.addRules('terms', [
+    required('You must accept the terms')
+  ])
+
+  // Re-render quando estado mudar
+  let container: HTMLElement | null = null
+  validator.watch(() => {
+    if (container) {
+      const newVNode = SignupForm()
+      container.replaceWith(newVNode as any)
+    }
+  })
+
+  const handleBlur = async (field: keyof SignupData) => {
+    validator.setTouched(field)
+    await validator.validateField(field)
+  }
+
+  const handleChange = (field: keyof SignupData, value: any) => {
+    validator.setValue(field, value)
+
+    // Valida em tempo real apenas se já tocou o campo
+    const fieldState = validator.getFieldState(field)
+    if (fieldState.touched) {
+      // Debounce para validações assíncronas
+      setTimeout(() => validator.validateField(field), 300)
+    }
+  }
+
+  const handleSubmit = async (e: Event) => {
+    e.preventDefault()
+
+    // Marca todos como touched
+    const fields = ['username', 'email', 'password', 'confirmPassword', 'age', 'terms'] as const
+    fields.forEach(field => validator.setTouched(field))
+
+    validator.setSubmitting(true)
+
+    // Valida tudo
+    const isValid = await validator.validateAll()
+
+    if (isValid) {
+      const values = validator.getValues()
+      console.log('Form submitted:', values)
+
+      // Simula envio
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      alert('Account created successfully!')
+      validator.reset()
+    }
+
+    validator.setSubmitting(false)
+  }
+
+  const renderField = (
+    field: keyof SignupData,
+    label: string,
+    type: string = 'text'
+  ) => {
+    const fieldState = validator.getFieldState(field)
+    const hasError = fieldState.touched && fieldState.error
+    const isValidating = fieldState.validating
+
+    return html`
+      <div class="form-group">
+        <label for=${field}>${label}</label>
+        <div class="input-wrapper">
+          <input
+            id=${field}
+            type=${type}
+            value=${fieldState.value}
+            oninput=${(e: Event) => {
+              const target = e.target as HTMLInputElement
+              handleChange(field, type === 'number' ? parseInt(target.value) : target.value)
+            }}
+            onblur=${() => handleBlur(field)}
+            class=${hasError ? 'error' : ''}
+            aria-invalid=${hasError ? 'true' : 'false'}
+            aria-describedby=${hasError ? `${field}-error` : undefined}
+          />
+          ${isValidating ? html`
+            <span class="spinner"></span>
+          ` : null}
+        </div>
+        ${hasError ? html`
+          <span id="${field}-error" class="error-message" role="alert">
+            ${fieldState.error}
+          </span>
+        ` : null}
+      </div>
+    `
+  }
+
+  const state = validator.getState()
+
+  return html`
+    <div class="signup-form" ref=${(el: HTMLElement) => { container = el }}>
+      <h1>Create Account</h1>
+
+      <form onsubmit=${handleSubmit} novalidate>
+        ${renderField('username', 'Username')}
+        ${renderField('email', 'Email', 'email')}
+        ${renderField('password', 'Password', 'password')}
+        ${renderField('confirmPassword', 'Confirm Password', 'password')}
+        ${renderField('age', 'Age', 'number')}
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              checked=${validator.getFieldState('terms').value}
+              onchange=${(e: Event) => {
+                const target = e.target as HTMLInputElement
+                handleChange('terms', target.checked)
+                handleBlur('terms')
+              }}
+            />
+            I accept the terms and conditions
+          </label>
+          ${validator.getFieldState('terms').touched && validator.getFieldState('terms').error ? html`
+            <span class="error-message" role="alert">
+              ${validator.getFieldState('terms').error}
+            </span>
+          ` : null}
+        </div>
+
+        <button
+          type="submit"
+          class="btn btn-primary btn-block"
+          disabled=${state.isSubmitting}
+        >
+          ${state.isSubmitting ? 'Creating Account...' : 'Create Account'}
+        </button>
+      </form>
+
+      <div class="form-footer">
+        Already have an account? <a href="/login">Login</a>
+      </div>
+    </div>
+  `
+}
+```
+
+<Aside type="tip">
+Use `novalidate` no form para desabilitar validação nativa do HTML5 e ter controle total sobre mensagens e UX.
+</Aside>
+
+## Estilos CSS
+
+```css title="styles.css"
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.input-wrapper {
+  position: relative;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+.form-group input.error {
+  border-color: #f44336;
+}
+
+.form-group input.error:focus {
+  box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.1);
+}
+
+.error-message {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: #f44336;
+}
+
+.spinner {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #4CAF50;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: normal !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  margin-right: 0.5rem;
+}
+```
+
+## Entry Point
+
+```typescript title="src/index.ts"
+import { render } from '@_bashell/slash'
+import { SignupForm } from './components/SignupForm'
+import './styles.css'
+
+const root = document.getElementById('app')
+if (root) {
+  render(SignupForm(), root)
+}
+```
+
+## Executando o Projeto
+
+```bash
+# Desenvolvimento
+bun run dev
+
+# Build
+bun run build
+```
+
+## Patterns de UX
+
+### 1. Validação Progressive
+
+Valide apenas após o usuário interagir:
+
+```typescript
+// Não valide imediatamente
+handleChange(field, value)
+
+// Valide apenas após blur
+handleBlur(field)
+```
+
+### 2. Debounce para Async
+
+Evite requisições excessivas:
+
+```typescript
+let debounceTimer: number
+
+const debouncedValidate = (field: keyof T) => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    validator.validateField(field)
+  }, 500) as any
+}
+```
+
+### 3. Feedback Visual Claro
+
+```typescript
+// Estados: idle, validating, valid, invalid
+const getInputClass = (field: FieldState) => {
+  if (field.validating) return 'validating'
+  if (field.touched && !field.error) return 'valid'
+  if (field.touched && field.error) return 'invalid'
+  return ''
+}
+```
+
+## Melhorias Possíveis
+
+1. **Field Array**: Validação de listas dinâmicas
+2. **Async Validation Cancel**: Cancelar validações em andamento
+3. **Custom Hooks**: Hooks reutilizáveis para diferentes forms
+4. **Internationalization**: Mensagens em múltiplos idiomas
+5. **Schema Validation**: Integração com Zod, Yup, etc
+6. **Dirty Tracking**: Detectar mudanças não salvas
+7. **Submit History**: Histórico de submissões
+
+## Pontos-Chave de Aprendizado
+
+1. **UX First**: Valide progressivamente, não agressivamente
+2. **Type Safety**: TypeScript garante consistência
+3. **Async Validation**: Debounce e feedback visual
+4. **Accessibility**: ARIA attributes e mensagens semânticas
+5. **Reusabilidade**: Validadores podem ser compostos e reutilizados
+
+## Próximos Passos
+
+- [Data Fetching Patterns](/exemplos/data-fetching/) - Padrões de carregamento de dados
+- [Forms API](/formularios/api/) - Documentação completa de formulários
+- [State Management](/fundamentos/estado/) - Gerenciamento de estado reativo

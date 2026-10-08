@@ -1,0 +1,914 @@
+---
+title: SPA com Roteamento
+description: Exemplo prático de uma Single Page Application completa com sistema de roteamento usando Slash
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+# SPA com Roteamento
+
+Este exemplo demonstra como criar uma Single Page Application (SPA) completa usando o sistema de roteamento do Slash. Você aprenderá sobre navegação client-side, route params, guards, lazy loading e transições de página.
+
+## Funcionalidades
+
+- ✅ Roteamento client-side (SPA)
+- ✅ Navegação com `<Link>` e programática
+- ✅ Route params e query strings
+- ✅ Navigation guards (auth, validação)
+- ✅ Lazy loading de componentes
+- ✅ Transições de página
+- ✅ 404 e tratamento de erros
+- ✅ Hash mode e History mode
+- ✅ Nested routes
+
+## Estrutura do Projeto
+
+```
+src/
+├── index.ts              # Entry point
+├── router.ts             # Configuração do router
+├── pages/
+│   ├── Home.ts           # Página inicial
+│   ├── About.ts          # Sobre
+│   ├── Products.ts       # Lista de produtos
+│   ├── ProductDetail.ts  # Detalhe do produto
+│   ├── Dashboard.ts      # Dashboard (protegido)
+│   ├── Login.ts          # Login
+│   └── NotFound.ts       # 404
+├── components/
+│   ├── Layout.ts         # Layout base
+│   ├── Header.ts         # Header com navegação
+│   └── PrivateRoute.ts   # HOC para rotas protegidas
+├── services/
+│   └── auth.ts           # Serviço de autenticação
+└── types.ts              # Tipos
+```
+
+## Tipos TypeScript
+
+```typescript title="src/types.ts"
+export interface User {
+  id: string
+  name: string
+  email: string
+  role: 'user' | 'admin'
+}
+
+export interface Product {
+  id: string
+  name: string
+  description: string
+  price: number
+  category: string
+  image: string
+}
+
+export interface RouteParams {
+  id?: string
+  [key: string]: string | undefined
+}
+```
+
+## Serviço de Autenticação
+
+```typescript title="src/services/auth.ts"
+import { createState } from '@_bashell/slash'
+import type { User } from '../types'
+
+// Estado de autenticação
+export const authState = createState<{
+  user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+}>({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true
+})
+
+// Carrega usuário do localStorage ao iniciar
+export const initAuth = (): void => {
+  const savedUser = localStorage.getItem('user')
+  if (savedUser) {
+    try {
+      const user = JSON.parse(savedUser)
+      authState.set({
+        user,
+        isAuthenticated: true,
+        isLoading: false
+      })
+    } catch (e) {
+      authState.set({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false
+      })
+    }
+  } else {
+    authState.set({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false
+    })
+  }
+}
+
+// Login
+export const login = async (email: string, password: string): Promise<void> => {
+  // Simula API call
+  await new Promise(resolve => setTimeout(resolve, 1000))
+
+  // Mock user
+  const user: User = {
+    id: '1',
+    name: 'John Doe',
+    email,
+    role: 'user'
+  }
+
+  localStorage.setItem('user', JSON.stringify(user))
+  authState.set({
+    user,
+    isAuthenticated: true,
+    isLoading: false
+  })
+}
+
+// Logout
+export const logout = (): void => {
+  localStorage.removeItem('user')
+  authState.set({
+    user: null,
+    isAuthenticated: false,
+    isLoading: false
+  })
+}
+
+// Check if user has role
+export const hasRole = (role: string): boolean => {
+  const state = authState.get()
+  return state.isAuthenticated && state.user?.role === role
+}
+```
+
+## Configuração do Router
+
+```typescript title="src/router.ts" {8-10,15-20,30-35}
+import { createRouter, type RouteConfig } from '@_bashell/slash'
+import { authState } from './services/auth'
+
+// Lazy load de páginas
+const Home = () => import('./pages/Home')
+const About = () => import('./pages/About')
+const Products = () => import('./pages/Products')
+const ProductDetail = () => import('./pages/ProductDetail')
+const Dashboard = () => import('./pages/Dashboard')
+const Login = () => import('./pages/Login')
+const NotFound = () => import('./pages/NotFound')
+
+// Guard de autenticação
+const authGuard = async (to: RouteConfig) => {
+  const state = authState.get()
+
+  if (!state.isAuthenticated) {
+    // Redireciona para login
+    return { redirect: '/login', query: { redirect: to.path } }
+  }
+
+  return true
+}
+
+// Guard de admin
+const adminGuard = async (to: RouteConfig) => {
+  const state = authState.get()
+
+  if (!state.isAuthenticated) {
+    return { redirect: '/login', query: { redirect: to.path } }
+  }
+
+  if (state.user?.role !== 'admin') {
+    return { redirect: '/', error: 'Access denied' }
+  }
+
+  return true
+}
+
+// Configuração de rotas
+const routes: RouteConfig[] = [
+  {
+    path: '/',
+    component: Home,
+    meta: { title: 'Home' }
+  },
+  {
+    path: '/about',
+    component: About,
+    meta: { title: 'About Us' }
+  },
+  {
+    path: '/products',
+    component: Products,
+    meta: { title: 'Products' }
+  },
+  {
+    path: '/products/:id',
+    component: ProductDetail,
+    meta: { title: 'Product Details' }
+  },
+  {
+    path: '/dashboard',
+    component: Dashboard,
+    meta: { title: 'Dashboard', requiresAuth: true },
+    beforeEnter: authGuard
+  },
+  {
+    path: '/admin',
+    component: () => import('./pages/Admin'),
+    meta: { title: 'Admin Panel', requiresAuth: true },
+    beforeEnter: adminGuard
+  },
+  {
+    path: '/login',
+    component: Login,
+    meta: { title: 'Login' }
+  },
+  {
+    path: '*',
+    component: NotFound,
+    meta: { title: '404 Not Found' }
+  }
+]
+
+// Cria router
+export const router = createRouter({
+  mode: 'history', // ou 'hash'
+  routes,
+  scrollBehavior: (to, from) => {
+    // Scroll to top ao navegar
+    return { top: 0, left: 0 }
+  }
+})
+
+// Global navigation guard
+router.beforeEach((to, from) => {
+  // Atualiza título da página
+  if (to.meta?.title) {
+    document.title = `${to.meta.title} - My SPA`
+  }
+
+  // Log de navegação (analytics)
+  console.log(`Navigating from ${from.path} to ${to.path}`)
+
+  return true
+})
+
+// After navigation hook
+router.afterEach((to, from) => {
+  // Pode usar para fechar modals, resetar estados, etc
+  console.log(`Navigated to ${to.path}`)
+})
+```
+
+<Aside type="note">
+Navigation guards são executados antes da navegação. Retorne `false` para cancelar, um objeto com `redirect` para redirecionar, ou `true` para prosseguir.
+</Aside>
+
+## Componente Header
+
+Header com navegação ativa:
+
+```typescript title="src/components/Header.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { Link, router } from '@_bashell/slash'
+import { authState, logout } from '../services/auth'
+
+export const Header = (): VNode => {
+  const auth = authState.get()
+  const currentPath = router.getCurrentRoute()?.path || '/'
+
+  const isActive = (path: string): boolean => {
+    return currentPath === path
+  }
+
+  const handleLogout = () => {
+    logout()
+    router.push('/')
+  }
+
+  return html`
+    <header class="header">
+      <div class="container">
+        <nav class="nav">
+          <div class="nav-brand">
+            ${Link({ to: '/', children: 'My SPA' })}
+          </div>
+
+          <ul class="nav-links">
+            <li class=${isActive('/') ? 'active' : ''}>
+              ${Link({ to: '/', children: 'Home' })}
+            </li>
+            <li class=${isActive('/products') ? 'active' : ''}>
+              ${Link({ to: '/products', children: 'Products' })}
+            </li>
+            <li class=${isActive('/about') ? 'active' : ''}>
+              ${Link({ to: '/about', children: 'About' })}
+            </li>
+
+            ${auth.isAuthenticated ? html`
+              <li class=${isActive('/dashboard') ? 'active' : ''}>
+                ${Link({ to: '/dashboard', children: 'Dashboard' })}
+              </li>
+              <li>
+                <button class="btn-link" onclick=${handleLogout}>
+                  Logout
+                </button>
+              </li>
+              <li class="user-info">
+                ${auth.user?.name}
+              </li>
+            ` : html`
+              <li class=${isActive('/login') ? 'active' : ''}>
+                ${Link({ to: '/login', children: 'Login' })}
+              </li>
+            `}
+          </ul>
+        </nav>
+      </div>
+    </header>
+  `
+}
+```
+
+## Página Home
+
+```typescript title="src/pages/Home.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { Link } from '@_bashell/slash'
+import { authState } from '../services/auth'
+
+export const Home = (): VNode => {
+  const auth = authState.get()
+
+  return html`
+    <div class="home">
+      <section class="hero">
+        <h1>Welcome to My SPA</h1>
+        <p>A single page application built with Slash</p>
+
+        ${auth.isAuthenticated ? html`
+          <p class="welcome">
+            Hello, ${auth.user?.name}!
+          </p>
+          ${Link({
+            to: '/dashboard',
+            class: 'btn btn-primary',
+            children: 'Go to Dashboard'
+          })}
+        ` : html`
+          ${Link({
+            to: '/login',
+            class: 'btn btn-primary',
+            children: 'Get Started'
+          })}
+        `}
+      </section>
+
+      <section class="features">
+        <h2>Features</h2>
+        <div class="feature-grid">
+          <div class="feature-card">
+            <h3>🚀 Fast Navigation</h3>
+            <p>Client-side routing for instant page transitions</p>
+          </div>
+          <div class="feature-card">
+            <h3>🔒 Protected Routes</h3>
+            <p>Authentication guards for secure areas</p>
+          </div>
+          <div class="feature-card">
+            <h3>📦 Lazy Loading</h3>
+            <p>Code splitting for optimal performance</p>
+          </div>
+          <div class="feature-card">
+            <h3>🎨 Modern UI</h3>
+            <p>Clean and responsive design</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <h2>Browse Our Products</h2>
+        ${Link({
+          to: '/products',
+          class: 'btn btn-secondary',
+          children: 'View Products'
+        })}
+      </section>
+    </div>
+  `
+}
+```
+
+## Página Products
+
+Lista de produtos com filtros:
+
+```typescript title="src/pages/Products.ts"
+import { html, type VNode, createState } from '@_bashell/slash'
+import { Link, router } from '@_bashell/slash'
+import type { Product } from '../types'
+
+// Mock de produtos
+const mockProducts: Product[] = [
+  {
+    id: '1',
+    name: 'Laptop Pro',
+    description: 'High-performance laptop',
+    price: 1299,
+    category: 'electronics',
+    image: '/images/laptop.jpg'
+  },
+  {
+    id: '2',
+    name: 'Wireless Mouse',
+    description: 'Ergonomic wireless mouse',
+    price: 29,
+    category: 'accessories',
+    image: '/images/mouse.jpg'
+  },
+  {
+    id: '3',
+    name: 'Mechanical Keyboard',
+    description: 'RGB mechanical keyboard',
+    price: 149,
+    category: 'accessories',
+    image: '/images/keyboard.jpg'
+  }
+]
+
+export const Products = (): VNode => {
+  const query = router.getCurrentRoute()?.query || {}
+  const categoryFilter = query.category || 'all'
+
+  const filterState = createState(categoryFilter)
+
+  const categories = ['all', 'electronics', 'accessories']
+
+  const filteredProducts = mockProducts.filter(p =>
+    filterState.get() === 'all' || p.category === filterState.get()
+  )
+
+  const handleFilterChange = (category: string) => {
+    filterState.set(category)
+    router.push({
+      path: '/products',
+      query: category === 'all' ? {} : { category }
+    })
+  }
+
+  return html`
+    <div class="products-page">
+      <h1>Our Products</h1>
+
+      <div class="filters">
+        <label>Filter by category:</label>
+        <div class="filter-buttons">
+          ${categories.map(cat => html`
+            <button
+              class=${`filter-btn ${filterState.get() === cat ? 'active' : ''}`}
+              onclick=${() => handleFilterChange(cat)}
+            >
+              ${cat.charAt(0).toUpperCase() + cat.slice(1)}
+            </button>
+          `)}
+        </div>
+      </div>
+
+      <div class="products-grid">
+        ${filteredProducts.map(product => html`
+          <div class="product-card">
+            <img src=${product.image} alt=${product.name} />
+            <h3>${product.name}</h3>
+            <p>${product.description}</p>
+            <div class="product-footer">
+              <span class="price">$${product.price}</span>
+              ${Link({
+                to: `/products/${product.id}`,
+                class: 'btn btn-sm',
+                children: 'View Details'
+              })}
+            </div>
+          </div>
+        `)}
+      </div>
+
+      ${filteredProducts.length === 0 ? html`
+        <div class="no-products">
+          <p>No products found in this category.</p>
+        </div>
+      ` : null}
+    </div>
+  `
+}
+```
+
+## Página ProductDetail
+
+Detalhe de produto com route params:
+
+```typescript title="src/pages/ProductDetail.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { router, Link } from '@_bashell/slash'
+import type { Product } from '../types'
+
+// Mock (em produção viria de API)
+const mockProducts: Record<string, Product> = {
+  '1': {
+    id: '1',
+    name: 'Laptop Pro',
+    description: 'High-performance laptop with latest specs',
+    price: 1299,
+    category: 'electronics',
+    image: '/images/laptop.jpg'
+  },
+  '2': {
+    id: '2',
+    name: 'Wireless Mouse',
+    description: 'Ergonomic wireless mouse with precision tracking',
+    price: 29,
+    category: 'accessories',
+    image: '/images/mouse.jpg'
+  }
+}
+
+export const ProductDetail = (): VNode => {
+  const route = router.getCurrentRoute()
+  const productId = route?.params?.id
+
+  if (!productId) {
+    return html`
+      <div class="error">
+        <h2>Product not found</h2>
+        ${Link({ to: '/products', children: '← Back to products' })}
+      </div>
+    `
+  }
+
+  const product = mockProducts[productId]
+
+  if (!product) {
+    return html`
+      <div class="error">
+        <h2>Product not found</h2>
+        ${Link({ to: '/products', children: '← Back to products' })}
+      </div>
+    `
+  }
+
+  const handleAddToCart = () => {
+    alert(`Added ${product.name} to cart!`)
+  }
+
+  return html`
+    <div class="product-detail">
+      ${Link({
+        to: '/products',
+        class: 'back-link',
+        children: '← Back to products'
+      })}
+
+      <div class="product-content">
+        <div class="product-image">
+          <img src=${product.image} alt=${product.name} />
+        </div>
+
+        <div class="product-info">
+          <h1>${product.name}</h1>
+
+          <div class="product-category">
+            Category: ${product.category}
+          </div>
+
+          <p class="product-description">
+            ${product.description}
+          </p>
+
+          <div class="product-price">
+            $${product.price}
+          </div>
+
+          <button
+            class="btn btn-primary btn-lg"
+            onclick=${handleAddToCart}
+          >
+            Add to Cart
+          </button>
+        </div>
+      </div>
+
+      <div class="related-products">
+        <h2>Related Products</h2>
+        <p>More products coming soon...</p>
+      </div>
+    </div>
+  `
+}
+```
+
+## Página Login
+
+```typescript title="src/pages/Login.ts"
+import { html, type VNode, createState, batch } from '@_bashell/slash'
+import { router } from '@_bashell/slash'
+import { login } from '../services/auth'
+
+export const Login = (): VNode => {
+  const formState = createState({
+    email: '',
+    password: '',
+    isLoading: false,
+    error: ''
+  })
+
+  const handleSubmit = async (e: Event) => {
+    e.preventDefault()
+    const state = formState.get()
+
+    batch(() => {
+      formState.set({
+        ...state,
+        isLoading: true,
+        error: ''
+      })
+    })
+
+    try {
+      await login(state.email, state.password)
+
+      // Redireciona para onde o usuário queria ir
+      const redirect = router.getCurrentRoute()?.query?.redirect || '/dashboard'
+      router.push(redirect as string)
+    } catch (error: any) {
+      formState.set({
+        ...formState.get(),
+        isLoading: false,
+        error: error.message || 'Login failed'
+      })
+    }
+  }
+
+  const state = formState.get()
+
+  return html`
+    <div class="login-page">
+      <div class="login-card">
+        <h1>Login</h1>
+
+        ${state.error ? html`
+          <div class="alert alert-error">
+            ${state.error}
+          </div>
+        ` : null}
+
+        <form onsubmit=${handleSubmit}>
+          <div class="form-group">
+            <label for="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              required
+              value=${state.email}
+              oninput=${(e: Event) => {
+                const target = e.target as HTMLInputElement
+                formState.set({ ...state, email: target.value })
+              }}
+              disabled=${state.isLoading}
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              required
+              value=${state.password}
+              oninput=${(e: Event) => {
+                const target = e.target as HTMLInputElement
+                formState.set({ ...state, password: target.value })
+              }}
+              disabled=${state.isLoading}
+            />
+          </div>
+
+          <button
+            type="submit"
+            class="btn btn-primary btn-block"
+            disabled=${state.isLoading}
+          >
+            ${state.isLoading ? 'Logging in...' : 'Login'}
+          </button>
+        </form>
+
+        <p class="hint">
+          Use any email and password to login
+        </p>
+      </div>
+    </div>
+  `
+}
+```
+
+## Página Dashboard (Protegida)
+
+```typescript title="src/pages/Dashboard.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { authState } from '../services/auth'
+
+export const Dashboard = (): VNode => {
+  const auth = authState.get()
+
+  return html`
+    <div class="dashboard">
+      <h1>Dashboard</h1>
+
+      <div class="welcome">
+        <h2>Welcome back, ${auth.user?.name}!</h2>
+        <p>Email: ${auth.user?.email}</p>
+        <p>Role: ${auth.user?.role}</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="dashboard-card">
+          <h3>📊 Analytics</h3>
+          <p>View your analytics and insights</p>
+        </div>
+
+        <div class="dashboard-card">
+          <h3>📝 Recent Activity</h3>
+          <p>Track your recent actions</p>
+        </div>
+
+        <div class="dashboard-card">
+          <h3>⚙️ Settings</h3>
+          <p>Manage your account settings</p>
+        </div>
+
+        <div class="dashboard-card">
+          <h3>💬 Messages</h3>
+          <p>Check your messages</p>
+        </div>
+      </div>
+    </div>
+  `
+}
+```
+
+## Layout Principal
+
+```typescript title="src/components/Layout.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { Router } from '@_bashell/slash'
+import { Header } from './Header'
+import { router } from '../router'
+
+export const Layout = (): VNode => {
+  return html`
+    <div class="app">
+      ${Header()}
+
+      <main class="main">
+        <div class="container">
+          ${Router({ router })}
+        </div>
+      </main>
+
+      <footer class="footer">
+        <div class="container">
+          <p>&copy; 2026 My SPA. Built with Slash.</p>
+        </div>
+      </footer>
+    </div>
+  `
+}
+```
+
+## Entry Point
+
+```typescript title="src/index.ts"
+import { render } from '@_bashell/slash'
+import { Layout } from './components/Layout'
+import { router } from './router'
+import { initAuth } from './services/auth'
+import './styles.css'
+
+// Inicializa autenticação
+initAuth()
+
+// Inicializa router
+router.init()
+
+// Render app
+const root = document.getElementById('app')
+if (root) {
+  render(Layout(), root)
+}
+```
+
+## Navegação Programática
+
+Exemplos de navegação via código:
+
+```typescript
+import { router } from './router'
+
+// Navegação simples
+router.push('/products')
+
+// Com params
+router.push('/products/123')
+
+// Com query strings
+router.push({
+  path: '/products',
+  query: { category: 'electronics', page: '1' }
+})
+
+// Voltar
+router.back()
+
+// Avançar
+router.forward()
+
+// Ir para índice específico no histórico
+router.go(-2) // volta 2 páginas
+
+// Replace (não adiciona ao histórico)
+router.replace('/login')
+```
+
+<Aside type="tip">
+Use `router.replace()` em vez de `router.push()` em redirects para evitar que o usuário volte para a página de redirect.
+</Aside>
+
+## Executando o Projeto
+
+```bash
+# Desenvolvimento
+bun run dev
+
+# Build
+bun run build
+```
+
+## Transições de Página
+
+Adicione transições suaves:
+
+```css
+/* Fade transition */
+.page-enter {
+  opacity: 0;
+}
+
+.page-enter-active {
+  opacity: 1;
+  transition: opacity 0.3s;
+}
+
+.page-leave {
+  opacity: 1;
+}
+
+.page-leave-active {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+```
+
+## Melhorias Possíveis
+
+1. **Breadcrumbs**: Navegação hierárquica
+2. **Loading States**: Skeleton screens durante navegação
+3. **Error Boundaries**: Tratamento de erros por rota
+4. **Route Transitions**: Animações entre páginas
+5. **Nested Routes**: Subrotas com layouts específicos
+6. **Route Meta**: Permissões, títulos, analytics
+7. **Scroll Restoration**: Lembrar posição do scroll
+8. **Prefetching**: Pré-carregar rotas ao hover
+
+## Pontos-Chave de Aprendizado
+
+1. **SPA Performance**: Navegação instantânea sem reload
+2. **Route Guards**: Controle de acesso às rotas
+3. **Lazy Loading**: Code splitting automático
+4. **Navigation Hooks**: beforeEach, afterEach para side effects
+5. **Query Params**: Estado na URL para compartilhamento
+6. **History API**: Controle total do histórico do navegador
+
+## Próximos Passos
+
+- [Form Validation](/exemplos/form-validation/) - Validação avançada de formulários
+- [Router API](/roteamento/api/) - Documentação completa do Router
+- [Navigation Guards](/roteamento/guards/) - Guards avançados

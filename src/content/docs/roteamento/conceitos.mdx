@@ -1,0 +1,475 @@
+---
+title: Roteamento
+description: Sistema de roteamento client-side para Single Page Applications (SPAs)
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+## O que é o Router?
+
+O Router do Slash é um sistema de roteamento **client-side** para criar Single Page Applications (SPAs). Ele permite navegar entre diferentes "páginas" sem recarregar o browser, mantendo a URL sincronizada com o conteúdo exibido.
+
+### Características principais
+
+- ✅ **Modo History API** ou **Hash mode**
+- ✅ **Parâmetros dinâmicos** (`/users/:id`)
+- ✅ **Query strings** (`?search=foo&page=2`)
+- ✅ **Navigation guards** (proteção de rotas)
+- ✅ **Rotas aninhadas** (nested routes)
+- ✅ **Metadados de rota** (custom data)
+- ✅ **SSR-ready** (Server-Side Rendering)
+- ✅ **Programmatic navigation** (`push`, `replace`, `back`, `forward`)
+
+## Criando um router
+
+Use `createRouter()` para criar uma instância do router:
+
+```typescript
+import { createRouter } from '@_bashell/slash'
+import type { RouterConfig } from '@_bashell/slash'
+
+const router = createRouter({
+  mode: 'history', // 'history' ou 'hash'
+  routes: [
+    {
+      path: '/',
+      component: () => html`<h1>Home</h1>`
+    },
+    {
+      path: '/about',
+      component: () => html`<h1>Sobre</h1>`
+    }
+  ]
+})
+```
+
+### Configuração do Router
+
+```typescript
+interface RouterConfig {
+  /** Array de definições de rotas */
+  routes: RouteConfig[]
+
+  /** Modo do router (padrão: "history") */
+  mode?: 'history' | 'hash'
+
+  /** Path de fallback para 404 (padrão: null) */
+  fallback?: string
+
+  /** Guards globais de navegação */
+  guards?: NavigationGuard[]
+
+  /** Path inicial (para SSR) */
+  initialPath?: string
+}
+```
+
+## Definindo rotas
+
+Cada rota é definida por um objeto `RouteConfig`:
+
+```typescript
+interface RouteConfig {
+  /** Padrão do path (ex: "/users/:id") */
+  path: string
+
+  /** Componente a ser renderizado */
+  component: (state: RouterState) => Child
+
+  /** Nome da rota (opcional) */
+  name?: string
+
+  /** Metadados da rota */
+  meta?: RouteMeta
+
+  /** Guards de navegação específicos */
+  guards?: NavigationGuard[]
+
+  /** Rotas filhas/aninhadas */
+  children?: RouteConfig[]
+}
+```
+
+### Exemplo básico
+
+```typescript
+import { html, createRouter } from '@_bashell/slash'
+
+const router = createRouter({
+  mode: 'history',
+  routes: [
+    {
+      path: '/',
+      name: 'home',
+      component: () => html`
+        <div class="home">
+          <h1>Bem-vindo!</h1>
+          <p>Esta é a página inicial</p>
+        </div>
+      `
+    },
+    {
+      path: '/about',
+      name: 'about',
+      meta: { requiresAuth: false },
+      component: () => html`
+        <div class="about">
+          <h1>Sobre nós</h1>
+          <p>Conheça nossa história</p>
+        </div>
+      `
+    }
+  ]
+})
+```
+
+## Componentes do Router
+
+### `<Router>`
+
+O componente `Router` renderiza o componente da rota atual:
+
+```typescript
+import { html, render } from '@_bashell/slash'
+import { Router } from '@_bashell/slash'
+
+const app = html`
+  <div id="app">
+    <nav>
+      <a href="/">Home</a>
+      <a href="/about">About</a>
+    </nav>
+
+    <main>
+      ${Router({ router })}
+    </main>
+  </div>
+`
+
+render(app, document.getElementById('root')!)
+```
+
+### `<Link>`
+
+O componente `Link` cria links de navegação que usam o router:
+
+```typescript
+import { html } from '@_bashell/slash'
+import { Link } from '@_bashell/slash'
+
+function Navigation({ router }) {
+  return html`
+    <nav>
+      <${Link} to="/" router=${router}>Home</${Link}>
+      <${Link} to="/about" router=${router}>About</${Link}>
+      <${Link} to="/users/123" router=${router}>Perfil</${Link}>
+    </nav>
+  `
+}
+```
+
+<Aside type="note">
+O componente `Link` previne o comportamento padrão do navegador e usa `router.push()` internamente, evitando reloads desnecessários.
+</Aside>
+
+## Parâmetros dinâmicos
+
+Rotas podem ter segmentos dinâmicos que extraem valores da URL:
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/users/:id',
+      component: (state) => {
+        const userId = state.params.id
+        return html`
+          <div>
+            <h1>Perfil do Usuário</h1>
+            <p>ID: ${userId}</p>
+          </div>
+        `
+      }
+    },
+    {
+      path: '/posts/:postId/comments/:commentId',
+      component: (state) => {
+        const { postId, commentId } = state.params
+        return html`
+          <div>
+            <h2>Post ${postId}</h2>
+            <p>Comentário ${commentId}</p>
+          </div>
+        `
+      }
+    }
+  ]
+})
+```
+
+### Acessando parâmetros
+
+Os parâmetros estão disponíveis em `state.params`:
+
+```typescript
+type RouteParams = Record<string, string>
+
+// Exemplo: /users/123
+// state.params = { id: "123" }
+
+// Exemplo: /posts/456/comments/789
+// state.params = { postId: "456", commentId: "789" }
+```
+
+## Query strings
+
+Query strings são automaticamente parseadas e disponíveis em `state.query`:
+
+```typescript
+const router = createRouter({
+  routes: [
+    {
+      path: '/search',
+      component: (state) => {
+        const { q, page } = state.query
+        // URL: /search?q=slash&page=2
+        // q = "slash", page = "2"
+
+        return html`
+          <div>
+            <h1>Busca: ${q || 'vazia'}</h1>
+            <p>Página: ${page || '1'}</p>
+          </div>
+        `
+      }
+    }
+  ]
+})
+```
+
+<Aside type="tip">
+Query params são sempre strings. Converta para números se necessário: `const page = parseInt(state.query.page || '1', 10)`
+</Aside>
+
+## Navegação programática
+
+O router expõe métodos para navegação programática:
+
+```typescript
+// Navegar para uma nova rota (adiciona ao histórico)
+await router.push('/about')
+
+// Substituir rota atual (não adiciona ao histórico)
+await router.replace('/login')
+
+// Voltar na história
+router.back()
+
+// Avançar na história
+router.forward()
+
+// Ir para entrada específica na história
+router.go(-2) // volta 2 páginas
+router.go(1)  // avança 1 página
+```
+
+### Exemplo prático
+
+```typescript
+import { html, createState } from '@_bashell/slash'
+
+function LoginForm({ router }) {
+  const credentials = createState({ email: '', password: '' })
+
+  const handleSubmit = async (e: Event) => {
+    e.preventDefault()
+
+    const { email, password } = credentials.get()
+
+    try {
+      const response = await login(email, password)
+
+      if (response.ok) {
+        // Redirecionar para dashboard após login
+        await router.push('/dashboard')
+      }
+    } catch (error) {
+      console.error('Erro ao fazer login:', error)
+    }
+  }
+
+  return html`
+    <form onSubmit=${handleSubmit}>
+      <input
+        type="email"
+        placeholder="Email"
+        onInput=${(e) => {
+          const state = credentials.get()
+          credentials.set({
+            ...state,
+            email: (e.target as HTMLInputElement).value
+          })
+        }}
+      />
+      <input
+        type="password"
+        placeholder="Senha"
+        onInput=${(e) => {
+          const state = credentials.get()
+          credentials.set({
+            ...state,
+            password: (e.target as HTMLInputElement).value
+          })
+        }}
+      />
+      <button type="submit">Entrar</button>
+    </form>
+  `
+}
+```
+
+## Estado do Router
+
+O router é um `State<RouterState>`, então você pode observar mudanças:
+
+```typescript
+interface RouterState {
+  /** Rota atual */
+  currentRoute: RouteMatch | null
+
+  /** Parâmetros da rota */
+  params: RouteParams
+
+  /** Query parameters */
+  query: RouteQuery
+
+  /** Metadados da rota */
+  meta: RouteMeta
+
+  /** Flag de navegação em progresso */
+  isNavigating: boolean
+}
+```
+
+### Reagindo a mudanças de rota
+
+```typescript
+import { createState } from '@_bashell/slash'
+
+// Observar mudanças na rota
+router.watch((state) => {
+  console.log('Navegou para:', state.currentRoute?.path)
+  console.log('Params:', state.params)
+  console.log('Query:', state.query)
+})
+
+// Criar estado derivado
+const currentPath = createState('')
+router.watch((state) => {
+  currentPath.set(state.currentRoute?.path || '/')
+})
+```
+
+## Exemplo completo: Blog SPA
+
+```typescript
+import { html, render, createRouter } from '@_bashell/slash'
+import { Router, Link } from '@_bashell/slash'
+
+// Componentes das páginas
+const Home = () => html`
+  <div>
+    <h1>Blog Slash</h1>
+    <p>Bem-vindo ao nosso blog!</p>
+  </div>
+`
+
+const PostList = (state) => {
+  const posts = [
+    { id: 1, title: 'Introdução ao Slash' },
+    { id: 2, title: 'Roteamento Avançado' },
+    { id: 3, title: 'SSR com Slash' }
+  ]
+
+  return html`
+    <div>
+      <h1>Posts</h1>
+      <ul>
+        ${posts.map(post => html`
+          <li>
+            <${Link} to=${`/posts/${post.id}`} router=${state.__router}>
+              ${post.title}
+            </${Link}>
+          </li>
+        `)}
+      </ul>
+    </div>
+  `
+}
+
+const PostDetail = (state) => {
+  const postId = state.params.id
+
+  return html`
+    <div>
+      <h1>Post #${postId}</h1>
+      <p>Conteúdo do post...</p>
+      <button onClick=${() => state.__router.back()}>
+        Voltar
+      </button>
+    </div>
+  `
+}
+
+// Criar router
+const router = createRouter({
+  mode: 'history',
+  routes: [
+    {
+      path: '/',
+      component: Home
+    },
+    {
+      path: '/posts',
+      component: PostList
+    },
+    {
+      path: '/posts/:id',
+      component: PostDetail
+    }
+  ]
+})
+
+// Injetar router no state para uso nos componentes
+const enhancedRouter = {
+  ...router,
+  get() {
+    return {
+      ...router.get(),
+      __router: router
+    }
+  }
+}
+
+// Renderizar app
+const app = html`
+  <div id="app">
+    <nav>
+      <${Link} to="/" router=${router}>Home</${Link}>
+      <${Link} to="/posts" router=${router}>Posts</${Link}>
+    </nav>
+
+    <main>
+      ${Router({ router: enhancedRouter })}
+    </main>
+  </div>
+`
+
+render(app, document.getElementById('root')!)
+```
+
+## Próximos passos
+
+- [Navigation Guards](/roteamento/guards/) - Proteção e controle de navegação
+- [Rotas Aninhadas](/roteamento/nested/) - Estrutura de rotas hierárquicas
+- [SSR com Router](/ssr/roteamento/) - Roteamento no servidor

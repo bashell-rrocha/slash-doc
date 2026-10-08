@@ -1,0 +1,437 @@
+---
+title: Developer Experience
+description: Ferramentas de desenvolvimento, warnings e debugging no Slash
+---
+
+import { Code, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+O Slash oferece ferramentas de desenvolvimento para ajudar a detectar anti-patterns, problemas de performance e uso incorreto da API durante o desenvolvimento.
+
+## Modo de Desenvolvimento
+
+O modo de desenvolvimento (`DEV_MODE`) é ativado automaticamente quando `process.env.NODE_ENV !== 'production'`. Neste modo, o Slash executa validações extras e emite warnings/errors no console.
+
+### Habilitando/Desabilitando Dev Mode
+
+```typescript
+import { setDevMode, isDevMode } from '@_bashell/slash';
+
+// Desabilitar modo dev (não recomendado)
+setDevMode(false);
+
+// Verificar se está em modo dev
+if (isDevMode()) {
+  console.log('Rodando em modo de desenvolvimento');
+}
+
+// Em produção, o dev mode é desabilitado automaticamente
+```
+
+<Aside type="caution">
+Em produção, o modo dev é automaticamente desabilitado para melhor performance. Warnings e validações extras não são executados.
+</Aside>
+
+## Warnings
+
+Warnings ajudam a detectar potenciais problemas e anti-patterns no código.
+
+### Habilitando/Desabilitando Warnings
+
+```typescript
+import { setWarningsEnabled, isWarningsEnabled } from '@_bashell/slash';
+
+// Desabilitar warnings (não recomendado)
+setWarningsEnabled(false);
+
+// Verificar se warnings estão habilitados
+if (isWarningsEnabled()) {
+  console.log('Warnings habilitados');
+}
+```
+
+### Tipos de Warnings
+
+O Slash detecta os seguintes anti-patterns:
+
+#### 1. Mutação Direta do Estado
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ count: 0 });
+
+// ❌ Errado - mutação direta
+// Emite erro: "Direct state mutation detected"
+state.get().count = 5;
+
+// ✅ Correto - usar .set()
+state.set({ count: 5 });
+```
+
+**Mensagem:**
+```
+❌ [SLASH ERROR] [STATE_MUTATION] Direct state mutation detected.
+Use state.set() instead of mutating state directly.
+
+💡 Hint:
+Replace: state.myProp = value
+With: state.set({ ...state.get(), myProp: value })
+```
+
+#### 2. Vazamento de Memória com Watchers
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ count: 0 });
+
+// ❌ Errado - não limpa o watcher
+function setupWatcher() {
+  state.watch((newVal) => {
+    console.log('Changed:', newVal);
+  });
+  // Se setupWatcher() for chamado múltiplas vezes,
+  // acumula watchers sem cleanup
+}
+
+// ✅ Correto - sempre fazer cleanup
+function setupWatcher() {
+  const unwatch = state.watch((newVal) => {
+    console.log('Changed:', newVal);
+  });
+
+  // Cleanup quando componente for destruído
+  return unwatch;
+}
+```
+
+**Mensagem (quando excede 1000 watchers):**
+```
+⚠️ [SLASH WARNING] [MEMORY_LEAK] High number of watchers detected (1234).
+This may indicate missing cleanup.
+
+💡 Hint:
+Make sure to call the cleanup function returned by state.watch():
+const unwatch = state.watch(callback);
+// Later: unwatch();
+```
+
+#### 3. Objetos Muito Grandes no Estado
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+// ❌ Errado - objeto muito grande (>1000 chaves)
+const hugeState = createState({
+  user1: {...},
+  user2: {...},
+  // ... 1000+ propriedades
+});
+
+// ✅ Correto - dividir em múltiplos estados
+const usersState = createState({});
+const settingsState = createState({});
+const cacheState = createState({});
+```
+
+**Mensagem:**
+```
+⚠️ [SLASH WARNING] [PERFORMANCE] Large object detected in state
+comparison (1234 keys). Consider breaking into smaller states.
+
+💡 Hint:
+Split large states into multiple smaller states for better performance:
+const userState = createState({ ... });
+const settingsState = createState({ ... });
+```
+
+#### 4. Estado Criado Dentro de Componentes
+
+```typescript
+import { html, createState } from '@_bashell/slash';
+
+// ❌ Errado - estado criado dentro do componente
+function Counter() {
+  const count = createState(0); // Warning!
+
+  return html`
+    <button onclick=${() => count.set(count.get() + 1)}>
+      Count: ${count.get()}
+    </button>
+  `;
+}
+
+// ✅ Correto - estado criado fora
+const count = createState(0);
+
+function Counter() {
+  return html`
+    <button onclick=${() => count.set(count.get() + 1)}>
+      Count: ${count.get()}
+    </button>
+  `;
+}
+```
+
+**Mensagem:**
+```
+⚠️ [SLASH WARNING] [REACTIVITY_VIOLATION] State created inside component.
+This may cause memory leaks and unexpected behavior.
+
+💡 Hint:
+Move state creation outside of component:
+// ❌ Bad:
+function MyComponent() {
+  const state = createState({});
+}
+
+// ✅ Good:
+const myState = createState({});
+function MyComponent() { ... }
+```
+
+#### 5. Batch Aninhado
+
+```typescript
+import { batch, createState } from '@_bashell/slash';
+
+const state = createState({ a: 0, b: 0 });
+
+// ❌ Errado - batch aninhado (redundante)
+batch(() => {
+  batch(() => { // Warning!
+    state.set({ a: 1, b: 2 });
+  });
+});
+
+// ✅ Correto - um único batch
+batch(() => {
+  state.set({ a: 1, b: 2 });
+});
+```
+
+**Mensagem:**
+```
+⚠️ [SLASH WARNING] [API_MISUSE] Nested batch detected (depth: 2).
+Nested batches are redundant.
+
+💡 Hint:
+Remove nested batch() calls:
+// ❌ Bad:
+batch(() => {
+  batch(() => { ... });
+});
+
+// ✅ Good:
+batch(() => { ... });
+```
+
+#### 6. Payload Inválido no Estado
+
+```typescript
+import { createState } from '@_bashell/slash';
+
+const state = createState({ count: 0 });
+
+// ❌ Errado - null não é permitido
+state.set(null); // Error!
+
+// ❌ Errado - primitivos não são permitidos
+state.set(42); // Error!
+
+// ✅ Correto - sempre passar objeto
+state.set({ count: 42 });
+```
+
+**Mensagem:**
+```
+❌ [SLASH ERROR] [TYPE_MISMATCH] State payload must be an object,
+received number.
+
+💡 Hint:
+Pass an object to state.set():
+state.set({ key: value });
+```
+
+## Lançando Exceções em Erros
+
+Por padrão, erros são apenas logados no console. Para ambientes de teste, você pode configurar o Slash para lançar exceções:
+
+```typescript
+import { setErrorsThrow } from '@_bashell/slash';
+
+// Útil em testes - lança exceção ao invés de console.error
+setErrorsThrow(true);
+
+// Agora erros lançam exceção
+const state = createState({ count: 0 });
+state.set(null); // Throws Error!
+```
+
+<Aside type="tip">
+Use `setErrorsThrow(true)` em testes para capturar erros com `expect().toThrow()`.
+</Aside>
+
+## Estrutura de Mensagens
+
+Todas as mensagens de desenvolvimento seguem um formato consistente:
+
+```typescript
+interface DevMessage {
+  type: 'error' | 'warning' | 'info';
+  category:
+    | 'STATE_MUTATION'
+    | 'REACTIVITY_VIOLATION'
+    | 'MEMORY_LEAK'
+    | 'PERFORMANCE'
+    | 'API_MISUSE'
+    | 'TYPE_MISMATCH';
+  message: string;
+  hint?: string;
+  context?: Record<string, unknown>;
+  timestamp: number;
+}
+```
+
+### Categorias de Mensagens
+
+| Categoria | Descrição |
+|-----------|-----------|
+| `STATE_MUTATION` | Mutação direta do estado detectada |
+| `REACTIVITY_VIOLATION` | Violação de regras de reatividade |
+| `MEMORY_LEAK` | Potencial vazamento de memória |
+| `PERFORMANCE` | Problemas de performance |
+| `API_MISUSE` | Uso incorreto da API |
+| `TYPE_MISMATCH` | Tipo incorreto de valor |
+
+## Debugging em Produção
+
+Em produção, todas as validações e warnings são desabilitados automaticamente para melhor performance. Se você precisa debugar em produção:
+
+<Tabs>
+  <TabItem label="Temporário">
+  ```typescript
+  // Habilitar temporariamente em produção
+  import { setDevMode, setWarningsEnabled } from '@_bashell/slash';
+
+  if (window.location.search.includes('debug=true')) {
+    setDevMode(true);
+    setWarningsEnabled(true);
+  }
+  ```
+  </TabItem>
+
+  <TabItem label="Condicional">
+  ```typescript
+  // Habilitar apenas para usuários específicos
+  import { setDevMode, setWarningsEnabled } from '@_bashell/slash';
+
+  const user = getCurrentUser();
+  if (user.role === 'admin' || user.isQA) {
+    setDevMode(true);
+    setWarningsEnabled(true);
+  }
+  ```
+  </TabItem>
+</Tabs>
+
+<Aside type="danger">
+Nunca deixe dev mode habilitado em produção permanentemente. Isso afeta performance e pode expor informações sensíveis.
+</Aside>
+
+## Best Practices
+
+1. **Sempre rode em dev mode durante desenvolvimento**
+   - Detecta problemas cedo
+   - Mensagens de erro claras e úteis
+
+2. **Corrija todos os warnings**
+   - Warnings indicam potenciais bugs
+   - Não ignore - investigue e corrija
+
+3. **Use `setErrorsThrow(true)` em testes**
+   - Captura erros com `expect().toThrow()`
+   - Garante que o código lida corretamente com erros
+
+4. **Desabilite em produção**
+   - Dev mode é automaticamente desabilitado
+   - Não force habilitação em produção
+
+5. **Monitore watchers**
+   - Sempre faça cleanup de watchers
+   - Use o warning de memory leak como alerta
+
+## Exemplo Completo
+
+```typescript
+import {
+  createState,
+  batch,
+  setDevMode,
+  setWarningsEnabled,
+  setErrorsThrow,
+  isDevMode
+} from '@_bashell/slash';
+
+// Configuração para testes
+if (process.env.NODE_ENV === 'test') {
+  setErrorsThrow(true);
+}
+
+// Configuração para desenvolvimento
+if (process.env.NODE_ENV === 'development') {
+  console.log('Dev mode:', isDevMode()); // true
+}
+
+// Estado fora do componente ✅
+const appState = createState({
+  users: [],
+  loading: false,
+  error: null
+});
+
+// Componente com boas práticas
+function UserList() {
+  // Cleanup de watcher ✅
+  const unwatch = appState.watch((state) => {
+    console.log('State changed:', state);
+  });
+
+  // Batch para múltiplas atualizações ✅
+  const loadUsers = async () => {
+    batch(() => {
+      appState.set({
+        ...appState.get(),
+        loading: true,
+        error: null
+      });
+    });
+
+    try {
+      const users = await fetchUsers();
+      appState.set({
+        ...appState.get(),
+        users,
+        loading: false
+      });
+    } catch (error) {
+      appState.set({
+        ...appState.get(),
+        error: error.message,
+        loading: false
+      });
+    }
+  };
+
+  // Retornar cleanup
+  return {
+    destroy: unwatch
+  };
+}
+```
+
+## Próximos Passos
+
+- [Hydration](/avancado/hydration/) - Como funciona a hidratação no SSR
+- [Performance](/avancado/performance/) - Best practices de performance
+- [Error Handling](/fundamentos/error-handling/) - Tratamento de erros

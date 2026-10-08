@@ -1,0 +1,862 @@
+---
+title: Data Fetching Patterns
+description: Padrões avançados de carregamento e gerenciamento de dados com Slash
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
+
+# Data Fetching Patterns
+
+Este exemplo demonstra padrões avançados de carregamento de dados usando Slash. Você aprenderá sobre loaders isomórficos, cache, invalidação, loading states, error handling, pagination, infinite scroll e otimização de performance.
+
+## Funcionalidades
+
+- ✅ Loaders isomórficos (SSR + Client)
+- ✅ Sistema de cache com TTL
+- ✅ Invalidação manual e automática
+- ✅ Loading states e skeletons
+- ✅ Error handling e retry
+- ✅ Pagination e infinite scroll
+- ✅ Optimistic updates
+- ✅ Prefetching e preloading
+- ✅ Parallel e serial data loading
+- ✅ Dependent queries
+
+## Estrutura do Projeto
+
+```
+src/
+├── index.ts              # Entry point
+├── loaders/
+│   ├── posts.ts          # Loader de posts
+│   ├── users.ts          # Loader de usuários
+│   └── comments.ts       # Loader de comentários
+├── components/
+│   ├── PostList.ts       # Lista com paginação
+│   ├── InfiniteScroll.ts # Lista com infinite scroll
+│   ├── UserProfile.ts    # Profile com dependent queries
+│   └── OptimisticUI.ts   # Updates otimistas
+├── hooks/
+│   └── useLoader.ts      # Hook reutilizável
+└── types.ts              # Tipos
+```
+
+## Tipos TypeScript
+
+```typescript title="src/types.ts"
+export interface Post {
+  id: string
+  title: string
+  body: string
+  userId: string
+  createdAt: string
+}
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  avatar: string
+}
+
+export interface Comment {
+  id: string
+  postId: string
+  userId: string
+  body: string
+  createdAt: string
+}
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  page: number
+  pageSize: number
+  total: number
+  hasMore: boolean
+}
+
+export interface LoaderState<T> {
+  data: T | null
+  isLoading: boolean
+  error: Error | null
+  isFetching: boolean
+}
+```
+
+## Loader Básico
+
+```typescript title="src/loaders/posts.ts" {5-8,15-18}
+import { createLoader, invalidateLoader } from '@_bashell/slash'
+import type { Post, PaginatedResponse } from '../types'
+
+// Loader de lista de posts com paginação
+export const postsLoader = createLoader<PaginatedResponse<Post>>(
+  async (page: number = 1, pageSize: number = 10) => {
+    const response = await fetch(
+      `https://jsonplaceholder.typicode.com/posts?_page=${page}&_limit=${pageSize}`
+    )
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch posts')
+    }
+
+    const data = await response.json()
+    const total = parseInt(response.headers.get('x-total-count') || '100')
+
+    return {
+      data,
+      page,
+      pageSize,
+      total,
+      hasMore: page * pageSize < total
+    }
+  },
+  {
+    ttl: 5 * 60 * 1000, // Cache por 5 minutos
+    key: (page, pageSize) => `posts:${page}:${pageSize}`,
+    onError: (error) => {
+      console.error('Posts loader error:', error)
+    }
+  }
+)
+
+// Loader de post individual
+export const postLoader = createLoader<Post>(
+  async (id: string) => {
+    const response = await fetch(
+      `https://jsonplaceholder.typicode.com/posts/${id}`
+    )
+
+    if (!response.ok) {
+      throw new Error('Post not found')
+    }
+
+    return response.json()
+  },
+  {
+    ttl: 10 * 60 * 1000, // Cache por 10 minutos
+    key: (id) => `post:${id}`
+  }
+)
+
+// Criar novo post (com invalidação)
+export const createPost = async (post: Omit<Post, 'id'>): Promise<Post> => {
+  const response = await fetch('https://jsonplaceholder.typicode.com/posts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(post)
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to create post')
+  }
+
+  const newPost = await response.json()
+
+  // Invalida cache de lista de posts
+  invalidateLoader(postsLoader)
+
+  return newPost
+}
+
+// Atualizar post existente
+export const updatePost = async (id: string, updates: Partial<Post>): Promise<Post> => {
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/posts/${id}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error('Failed to update post')
+  }
+
+  const updated = await response.json()
+
+  // Invalida caches específicos
+  invalidateLoader(postLoader, id)
+  invalidateLoader(postsLoader)
+
+  return updated
+}
+
+// Deletar post
+export const deletePost = async (id: string): Promise<void> => {
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/posts/${id}`,
+    { method: 'DELETE' }
+  )
+
+  if (!response.ok) {
+    throw new Error('Failed to delete post')
+  }
+
+  // Invalida caches
+  invalidateLoader(postLoader, id)
+  invalidateLoader(postsLoader)
+}
+```
+
+<Aside type="note">
+A função `key` é crucial para cache correto. Use todos os parâmetros relevantes para gerar uma chave única.
+</Aside>
+
+## Hook Reutilizável
+
+```typescript title="src/hooks/useLoader.ts"
+import { createState, batch } from '@_bashell/slash'
+import type { LoaderState } from '../types'
+
+export function useLoader<T, Args extends any[]>(
+  loaderFn: (...args: Args) => T | Promise<T>,
+  args: Args,
+  options?: {
+    enabled?: boolean
+    retry?: number
+    retryDelay?: number
+    onSuccess?: (data: T) => void
+    onError?: (error: Error) => void
+  }
+) {
+  const state = createState<LoaderState<T>>({
+    data: null,
+    isLoading: true,
+    error: null,
+    isFetching: false
+  })
+
+  const enabled = options?.enabled ?? true
+  const retry = options?.retry ?? 0
+  const retryDelay = options?.retryDelay ?? 1000
+
+  let attemptCount = 0
+
+  const load = async () => {
+    batch(() => {
+      state.set({
+        ...state.get(),
+        isLoading: state.get().data === null,
+        isFetching: true,
+        error: null
+      })
+    })
+
+    try {
+      const data = await loaderFn(...args)
+
+      batch(() => {
+        state.set({
+          data,
+          isLoading: false,
+          error: null,
+          isFetching: false
+        })
+      })
+
+      options?.onSuccess?.(data)
+      attemptCount = 0
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Unknown error')
+
+      if (attemptCount < retry) {
+        attemptCount++
+        setTimeout(load, retryDelay * attemptCount)
+      } else {
+        batch(() => {
+          state.set({
+            ...state.get(),
+            isLoading: false,
+            error: err,
+            isFetching: false
+          })
+        })
+
+        options?.onError?.(err)
+      }
+    }
+  }
+
+  // Carrega dados se enabled
+  if (enabled) {
+    load()
+  }
+
+  return {
+    ...state.get(),
+    refetch: load,
+    state
+  }
+}
+```
+
+## Paginação Tradicional
+
+```typescript title="src/components/PostList.ts"
+import { html, type VNode, createState, batch } from '@_bashell/slash'
+import { postsLoader } from '../loaders/posts'
+import type { Post } from '../types'
+
+export const PostList = (): VNode => {
+  const pageState = createState(1)
+  const pageSize = 10
+
+  const page = pageState.get()
+  const result = postsLoader(page, pageSize)
+
+  // Re-render quando mudar
+  pageState.watch(() => {
+    // Trigger re-render
+  })
+
+  const renderPost = (post: Post) => html`
+    <article class="post-card">
+      <h3>${post.title}</h3>
+      <p>${post.body.substring(0, 100)}...</p>
+      <a href=${`/posts/${post.id}`}>Read more</a>
+    </article>
+  `
+
+  const handlePrevPage = () => {
+    if (page > 1) {
+      batch(() => {
+        pageState.set(page - 1)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      })
+    }
+  }
+
+  const handleNextPage = () => {
+    if (result?.hasMore) {
+      batch(() => {
+        pageState.set(page + 1)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      })
+    }
+  }
+
+  if (!result) {
+    return html`
+      <div class="loading">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="post-list">
+      <h1>Posts</h1>
+
+      <div class="posts-grid">
+        ${result.data.map(renderPost)}
+      </div>
+
+      <div class="pagination">
+        <button
+          class="btn"
+          onclick=${handlePrevPage}
+          disabled=${page === 1}
+        >
+          ← Previous
+        </button>
+
+        <span class="page-info">
+          Page ${page} of ${Math.ceil(result.total / pageSize)}
+        </span>
+
+        <button
+          class="btn"
+          onclick=${handleNextPage}
+          disabled=${!result.hasMore}
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  `
+}
+```
+
+## Infinite Scroll
+
+```typescript title="src/components/InfiniteScroll.ts"
+import { html, type VNode, createState, batch } from '@_bashell/slash'
+import { postsLoader } from '../loaders/posts'
+import type { Post } from '../types'
+
+export const InfiniteScroll = (): VNode => {
+  const state = createState({
+    posts: [] as Post[],
+    page: 1,
+    isLoading: false,
+    hasMore: true
+  })
+
+  let sentinel: HTMLElement | null = null
+  let observer: IntersectionObserver | null = null
+
+  // Carrega primeira página
+  const loadPage = async (page: number) => {
+    if (state.get().isLoading) return
+
+    state.set({ ...state.get(), isLoading: true })
+
+    try {
+      const result = await postsLoader(page, 10)
+
+      if (result) {
+        batch(() => {
+          state.set({
+            posts: page === 1 ? result.data : [...state.get().posts, ...result.data],
+            page,
+            isLoading: false,
+            hasMore: result.hasMore
+          })
+        })
+      }
+    } catch (error) {
+      console.error('Failed to load posts:', error)
+      state.set({ ...state.get(), isLoading: false })
+    }
+  }
+
+  // Load inicial
+  loadPage(1)
+
+  // Configura intersection observer
+  const setupObserver = (el: HTMLElement) => {
+    sentinel = el
+
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && state.get().hasMore && !state.get().isLoading) {
+          loadPage(state.get().page + 1)
+        }
+      },
+      { threshold: 0.5 }
+    )
+
+    observer.observe(sentinel)
+  }
+
+  // Cleanup
+  const cleanup = () => {
+    if (observer && sentinel) {
+      observer.unobserve(sentinel)
+      observer.disconnect()
+    }
+  }
+
+  const currentState = state.get()
+
+  return html`
+    <div class="infinite-scroll">
+      <h1>Infinite Scroll Posts</h1>
+
+      <div class="posts-grid">
+        ${currentState.posts.map(post => html`
+          <article class="post-card">
+            <h3>${post.title}</h3>
+            <p>${post.body.substring(0, 100)}...</p>
+            <a href=${`/posts/${post.id}`}>Read more</a>
+          </article>
+        `)}
+      </div>
+
+      ${currentState.isLoading ? html`
+        <div class="loading-more">
+          <div class="spinner"></div>
+          <p>Loading more posts...</p>
+        </div>
+      ` : null}
+
+      ${currentState.hasMore ? html`
+        <div
+          class="sentinel"
+          ref=${setupObserver}
+        ></div>
+      ` : html`
+        <div class="end-message">
+          <p>No more posts to load</p>
+        </div>
+      `}
+    </div>
+  `
+}
+```
+
+<Aside type="tip">
+Use Intersection Observer API para detectar quando o usuário está próximo ao fim da lista. Isso é mais eficiente que scroll events.
+</Aside>
+
+## Dependent Queries
+
+Queries que dependem de outras queries:
+
+```typescript title="src/components/UserProfile.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { userLoader } from '../loaders/users'
+import { postsLoader } from '../loaders/posts'
+import { useLoader } from '../hooks/useLoader'
+import type { User, Post } from '../types'
+
+interface UserProfileProps {
+  userId: string
+}
+
+export const UserProfile = ({ userId }: UserProfileProps): VNode => {
+  // 1. Carrega usuário primeiro
+  const userQuery = useLoader(
+    (id: string) => userLoader(id),
+    [userId]
+  )
+
+  // 2. Carrega posts do usuário apenas quando user carregar
+  const postsQuery = useLoader(
+    (uid: string) => postsLoader(1, 10), // Filtrado por userId
+    [userId],
+    {
+      enabled: userQuery.data !== null, // Só carrega se user já carregou
+      retry: 2
+    }
+  )
+
+  // Loading inicial
+  if (userQuery.isLoading) {
+    return html`
+      <div class="user-profile">
+        <div class="skeleton-profile"></div>
+      </div>
+    `
+  }
+
+  // Error no usuário
+  if (userQuery.error) {
+    return html`
+      <div class="error">
+        <h2>Failed to load user</h2>
+        <p>${userQuery.error.message}</p>
+        <button class="btn" onclick=${userQuery.refetch}>
+          Retry
+        </button>
+      </div>
+    `
+  }
+
+  const user = userQuery.data!
+
+  return html`
+    <div class="user-profile">
+      <header class="profile-header">
+        <img src=${user.avatar} alt=${user.name} />
+        <h1>${user.name}</h1>
+        <p>${user.email}</p>
+      </header>
+
+      <section class="user-posts">
+        <h2>Posts by ${user.name}</h2>
+
+        ${postsQuery.isLoading ? html`
+          <div class="loading">Loading posts...</div>
+        ` : postsQuery.error ? html`
+          <div class="error">
+            <p>Failed to load posts</p>
+            <button class="btn" onclick=${postsQuery.refetch}>
+              Retry
+            </button>
+          </div>
+        ` : html`
+          <div class="posts-grid">
+            ${postsQuery.data?.data.map(post => html`
+              <article class="post-card">
+                <h3>${post.title}</h3>
+                <p>${post.body.substring(0, 100)}...</p>
+              </article>
+            `)}
+          </div>
+        `}
+      </section>
+    </div>
+  `
+}
+```
+
+## Parallel Loading
+
+Carregar múltiplos dados em paralelo:
+
+```typescript title="src/components/Dashboard.ts"
+import { html, type VNode } from '@_bashell/slash'
+import { useLoader } from '../hooks/useLoader'
+import { postsLoader } from '../loaders/posts'
+import { usersLoader } from '../loaders/users'
+import { commentsLoader } from '../loaders/comments'
+
+export const Dashboard = (): VNode => {
+  // Carrega tudo em paralelo
+  const posts = useLoader(() => postsLoader(1, 5), [])
+  const users = useLoader(() => usersLoader(1, 5), [])
+  const comments = useLoader(() => commentsLoader(1, 10), [])
+
+  const isLoading = posts.isLoading || users.isLoading || comments.isLoading
+  const hasError = posts.error || users.error || comments.error
+
+  if (isLoading) {
+    return html`
+      <div class="dashboard">
+        <h1>Dashboard</h1>
+        <div class="loading">Loading dashboard data...</div>
+      </div>
+    `
+  }
+
+  if (hasError) {
+    return html`
+      <div class="dashboard">
+        <h1>Dashboard</h1>
+        <div class="error">
+          <p>Failed to load some data</p>
+          <button class="btn" onclick=${() => {
+            posts.refetch()
+            users.refetch()
+            comments.refetch()
+          }}>
+            Retry All
+          </button>
+        </div>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="dashboard">
+      <h1>Dashboard</h1>
+
+      <div class="dashboard-grid">
+        <div class="widget">
+          <h2>Recent Posts (${posts.data?.total})</h2>
+          <ul>
+            ${posts.data?.data.slice(0, 5).map(post => html`
+              <li>${post.title}</li>
+            `)}
+          </ul>
+        </div>
+
+        <div class="widget">
+          <h2>Users (${users.data?.total})</h2>
+          <ul>
+            ${users.data?.data.slice(0, 5).map(user => html`
+              <li>${user.name}</li>
+            `)}
+          </ul>
+        </div>
+
+        <div class="widget">
+          <h2>Recent Comments (${comments.data?.total})</h2>
+          <ul>
+            ${comments.data?.data.slice(0, 5).map(comment => html`
+              <li>${comment.body.substring(0, 50)}...</li>
+            `)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  `
+}
+```
+
+## Optimistic Updates
+
+Atualizar UI antes da confirmação do servidor:
+
+```typescript title="src/components/OptimisticUI.ts"
+import { html, type VNode, createState, batch } from '@_bashell/slash'
+import { postsLoader, updatePost } from '../loaders/posts'
+import type { Post } from '../types'
+
+interface OptimisticPostProps {
+  post: Post
+}
+
+export const OptimisticPost = ({ post }: OptimisticPostProps): VNode => {
+  const state = createState({
+    post,
+    isUpdating: false,
+    optimisticUpdate: null as Partial<Post> | null
+  })
+
+  const handleLike = async () => {
+    const currentLikes = (state.get().post as any).likes || 0
+    const optimisticPost = {
+      ...state.get().post,
+      likes: currentLikes + 1
+    }
+
+    // 1. Update UI imediatamente (optimistic)
+    batch(() => {
+      state.set({
+        ...state.get(),
+        post: optimisticPost,
+        isUpdating: true,
+        optimisticUpdate: { likes: currentLikes + 1 }
+      })
+    })
+
+    try {
+      // 2. Envia para servidor
+      const updated = await updatePost(post.id, {
+        ...post,
+        likes: currentLikes + 1
+      } as any)
+
+      // 3. Confirma com dados do servidor
+      batch(() => {
+        state.set({
+          ...state.get(),
+          post: updated,
+          isUpdating: false,
+          optimisticUpdate: null
+        })
+      })
+    } catch (error) {
+      // 4. Reverte em caso de erro
+      batch(() => {
+        state.set({
+          ...state.get(),
+          post, // volta ao original
+          isUpdating: false,
+          optimisticUpdate: null
+        })
+      })
+
+      alert('Failed to like post')
+    }
+  }
+
+  const currentState = state.get()
+  const displayPost = currentState.post
+
+  return html`
+    <article class=${`post ${currentState.isUpdating ? 'updating' : ''}`}>
+      <h3>${displayPost.title}</h3>
+      <p>${displayPost.body}</p>
+
+      <div class="post-actions">
+        <button
+          class="btn-like"
+          onclick=${handleLike}
+          disabled=${currentState.isUpdating}
+        >
+          ❤️ ${(displayPost as any).likes || 0}
+          ${currentState.isUpdating ? '...' : ''}
+        </button>
+      </div>
+    </article>
+  `
+}
+```
+
+<Aside type="caution">
+Optimistic updates melhoram UX mas requerem tratamento cuidadoso de erros. Sempre reverta em caso de falha e informe o usuário.
+</Aside>
+
+## Prefetching
+
+Pré-carregar dados ao hover:
+
+```typescript
+import { postsLoader } from '../loaders/posts'
+
+const handleMouseEnter = (postId: string) => {
+  // Pré-carrega dados do post
+  postsLoader(postId)
+}
+
+// No componente
+html`
+  <a
+    href=${`/posts/${post.id}`}
+    onmouseenter=${() => handleMouseEnter(post.id)}
+  >
+    ${post.title}
+  </a>
+`
+```
+
+## Skeleton Screens
+
+```css
+.skeleton-card {
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 25%,
+    #e0e0e0 50%,
+    #f0f0f0 75%
+  );
+  background-size: 200% 100%;
+  animation: loading 1.5s ease-in-out infinite;
+  border-radius: 8px;
+  height: 200px;
+  margin-bottom: 1rem;
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+```
+
+## Executando o Projeto
+
+```bash
+# Desenvolvimento
+bun run dev
+
+# Build
+bun run build
+```
+
+## Performance Tips
+
+### 1. Cache Agressivo
+
+```typescript
+createLoader(fetchFn, {
+  ttl: 60 * 60 * 1000, // 1 hora para dados estáticos
+  staleWhileRevalidate: true // Mostra cache enquanto revalida
+})
+```
+
+### 2. Request Deduplication
+
+Os loaders já fazem isso automaticamente - múltiplas chamadas simultâneas compartilham a mesma request.
+
+### 3. Invalidação Granular
+
+```typescript
+// Ruim: invalida tudo
+invalidateLoader(postsLoader)
+
+// Bom: invalida apenas o necessário
+invalidateLoader(postLoader, specificId)
+```
+
+## Pontos-Chave de Aprendizado
+
+1. **Loaders Isomórficos**: Mesmo código no servidor e cliente
+2. **Cache Inteligente**: TTL, keys e invalidação
+3. **UX First**: Loading states, errors, retry logic
+4. **Optimistic Updates**: Feedback imediato
+5. **Performance**: Parallel loading, prefetching, deduplication
+
+## Próximos Passos
+
+- [Universal Data Loading](/avancado/data-loading/) - Documentação completa
+- [SSR](/avancado/ssr/) - Server-Side Rendering patterns
+- [State Management](/fundamentos/estado/) - Gerenciamento de estado

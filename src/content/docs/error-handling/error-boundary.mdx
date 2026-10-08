@@ -1,0 +1,561 @@
+---
+title: Error Handling
+description: Tratamento de erros com ErrorBoundary e helpers de error handling
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+## Tratamento de erros no Slash
+
+O Slash fornece ferramentas para capturar e tratar erros tanto **síncronos** quanto **assíncronos**, em **client-side** e **server-side rendering (SSR)**.
+
+### Ferramentas disponíveis
+
+- **`ErrorBoundary`**: Componente para capturar erros durante renderização
+- **`catchAsync`**: Wrapper para funções assíncronas com tratamento de erro
+- **`safeRender`**: Renderização segura para SSR
+- **`setupGlobalErrorHandler`**: Handler global para erros não capturados
+
+## ErrorBoundary
+
+O `ErrorBoundary` é um componente que **captura erros de renderização** em seus children e exibe um fallback UI.
+
+### Uso básico
+
+```typescript
+import { html } from '@_bashell/slash'
+import { ErrorBoundary } from '@_bashell/slash'
+
+function App() {
+  return html`
+    <div>
+      <h1>Minha Aplicação</h1>
+
+      <${ErrorBoundary}
+        fallback=${(error) => html`
+          <div class="error-container">
+            <h2>Algo deu errado!</h2>
+            <p>${error.message}</p>
+          </div>
+        `}
+        onError=${(error, errorInfo) => {
+          console.error('Erro capturado:', error)
+          // Enviar para serviço de logging (ex: Sentry)
+        }}
+      >
+        <${ProblematicComponent} />
+      </${ErrorBoundary}>
+    </div>
+  `
+}
+```
+
+### Props do ErrorBoundary
+
+```typescript
+type ErrorBoundaryProps = {
+  /** Função que renderiza UI de fallback quando há erro */
+  fallback: (error: Error) => Child
+
+  /** Callback opcional chamado quando erro ocorre */
+  onError?: (error: Error, errorInfo: { componentStack?: string }) => void
+
+  /** Children a serem renderizados */
+  children: Child
+}
+```
+
+### Exemplo: Proteção de seções críticas
+
+```typescript
+import { html } from '@_bashell/slash'
+import { ErrorBoundary } from '@_bashell/slash'
+
+function Dashboard() {
+  return html`
+    <div class="dashboard">
+      <header>
+        <h1>Dashboard</h1>
+      </header>
+
+      <!-- Seção 1: Protegida -->
+      <${ErrorBoundary}
+        fallback=${(error) => html`
+          <div class="widget-error">
+            <p>Não foi possível carregar os dados do usuário.</p>
+            <button onClick=${() => window.location.reload()}>
+              Tentar novamente
+            </button>
+          </div>
+        `}
+      >
+        <${UserWidget} />
+      </${ErrorBoundary}>
+
+      <!-- Seção 2: Protegida -->
+      <${ErrorBoundary}
+        fallback=${(error) => html`
+          <div class="widget-error">
+            <p>Erro ao carregar estatísticas.</p>
+          </div>
+        `}
+      >
+        <${StatsWidget} />
+      </${ErrorBoundary}>
+
+      <!-- Seção 3: Protegida -->
+      <${ErrorBoundary}
+        fallback=${(error) => html`
+          <div class="widget-error">
+            <p>Gráfico indisponível no momento.</p>
+          </div>
+        `}
+      >
+        <${ChartWidget} />
+      </${ErrorBoundary}>
+    </div>
+  `
+}
+```
+
+<Aside type="tip">
+Use múltiplos `ErrorBoundary` para isolar falhas. Se um widget falhar, os outros continuam funcionando!
+</Aside>
+
+### Exemplo: Integração com serviços de logging
+
+```typescript
+import { html } from '@_bashell/slash'
+import { ErrorBoundary } from '@_bashell/slash'
+
+// Integração com Sentry (exemplo)
+function logErrorToSentry(error: Error, errorInfo: any) {
+  if (typeof Sentry !== 'undefined') {
+    Sentry.captureException(error, {
+      contexts: {
+        react: errorInfo
+      }
+    })
+  }
+}
+
+function App() {
+  return html`
+    <${ErrorBoundary}
+      fallback=${(error) => html`
+        <div class="error-page">
+          <h1>Oops!</h1>
+          <p>Algo inesperado aconteceu.</p>
+          <details>
+            <summary>Detalhes técnicos</summary>
+            <pre>${error.stack}</pre>
+          </details>
+        </div>
+      `}
+      onError=${logErrorToSentry}
+    >
+      <${Router} router=${router} />
+    </${ErrorBoundary}>
+  `
+}
+```
+
+## catchAsync
+
+`catchAsync` é um wrapper para funções assíncronas que captura erros automaticamente:
+
+```typescript
+function catchAsync<T>(
+  fn: () => Promise<T>,
+  onError?: (error: Error) => void
+): [
+  safeFn: () => Promise<T | null>,
+  getError: () => Error | null
+]
+```
+
+### Uso básico
+
+```typescript
+import { html, createState } from '@_bashell/slash'
+import { catchAsync } from '@_bashell/slash'
+
+function UserProfile({ userId }: { userId: number }) {
+  const userData = createState<any>(null)
+
+  // Criar função segura que captura erros
+  const [fetchUser, getError] = catchAsync(
+    async () => {
+      const res = await fetch(`/api/users/${userId}`)
+      if (!res.ok) throw new Error('Falha ao carregar usuário')
+      return res.json()
+    },
+    (error) => {
+      console.error('Erro ao buscar usuário:', error)
+    }
+  )
+
+  // Executar fetch
+  fetchUser().then((data) => {
+    if (data) userData.set(data)
+  })
+
+  const error = getError()
+  const user = userData.get()
+
+  if (error) {
+    return html`
+      <div class="error">
+        <p>Erro: ${error.message}</p>
+        <button onClick=${() => fetchUser()}>Tentar novamente</button>
+      </div>
+    `
+  }
+
+  if (!user) {
+    return html`<p>Carregando...</p>`
+  }
+
+  return html`
+    <div class="user-profile">
+      <h2>${user.name}</h2>
+      <p>${user.email}</p>
+    </div>
+  `
+}
+```
+
+### Exemplo: Múltiplas operações assíncronas
+
+```typescript
+import { html, createState } from '@_bashell/slash'
+import { catchAsync } from '@_bashell/slash'
+
+function DataDashboard() {
+  const data = createState<any>(null)
+
+  const [fetchData1, getError1] = catchAsync(async () => {
+    const res = await fetch('/api/data1')
+    return res.json()
+  })
+
+  const [fetchData2, getError2] = catchAsync(async () => {
+    const res = await fetch('/api/data2')
+    return res.json()
+  })
+
+  const [fetchData3, getError3] = catchAsync(async () => {
+    const res = await fetch('/api/data3')
+    return res.json()
+  })
+
+  // Executar todas as requisições
+  Promise.all([fetchData1(), fetchData2(), fetchData3()]).then(
+    ([data1, data2, data3]) => {
+      data.set({ data1, data2, data3 })
+    }
+  )
+
+  const error1 = getError1()
+  const error2 = getError2()
+  const error3 = getError3()
+
+  return html`
+    <div>
+      ${error1 && html`<p class="error">Erro ao carregar dados 1</p>`}
+      ${error2 && html`<p class="error">Erro ao carregar dados 2</p>`}
+      ${error3 && html`<p class="error">Erro ao carregar dados 3</p>`}
+
+      ${data.get() && html`<pre>${JSON.stringify(data.get(), null, 2)}</pre>`}
+    </div>
+  `
+}
+```
+
+## safeRender
+
+`safeRender` é um wrapper para renderização segura, especialmente útil para **SSR**:
+
+```typescript
+function safeRender(
+  view: () => Child,
+  fallback: (error: Error) => Child
+): Child
+```
+
+### Uso em SSR
+
+```typescript
+import { renderToString, safeRender } from '@_bashell/slash'
+
+// No servidor
+app.get('*', (req, res) => {
+  const html = safeRender(
+    () => renderToString(html`<${App} url=${req.url} />`),
+    (error) => {
+      console.error('Erro SSR:', error)
+      return `<div class="error">Erro ao renderizar página</div>`
+    }
+  )
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <body>
+        <div id="root">${html}</div>
+        <script src="/client.js"></script>
+      </body>
+    </html>
+  `)
+})
+```
+
+### Uso em componentes
+
+```typescript
+import { html } from '@_bashell/slash'
+import { safeRender } from '@_bashell/slash'
+
+function DangerousComponent() {
+  return safeRender(
+    () => {
+      // Código que pode lançar erro
+      const data = JSON.parse(someUntrustedString)
+      return html`<div>${data.value}</div>`
+    },
+    (error) => html`
+      <div class="error">
+        <p>Erro ao processar dados</p>
+        <pre>${error.message}</pre>
+      </div>
+    `
+  )
+}
+```
+
+## setupGlobalErrorHandler
+
+Configura um handler global para capturar **todos os erros não tratados**:
+
+```typescript
+function setupGlobalErrorHandler(
+  onError: (error: Error, source: 'render' | 'runtime') => void
+): void
+```
+
+### Uso básico
+
+```typescript
+import { setupGlobalErrorHandler } from '@_bashell/slash'
+
+// Configurar no início da aplicação (client-side)
+setupGlobalErrorHandler((error, source) => {
+  console.error(`Erro ${source}:`, error)
+
+  // Enviar para serviço de monitoramento
+  if (typeof Sentry !== 'undefined') {
+    Sentry.captureException(error, {
+      tags: { source }
+    })
+  }
+
+  // Exibir toast/notificação para o usuário
+  showErrorNotification('Algo deu errado. Por favor, recarregue a página.')
+})
+```
+
+### Exemplo: Sistema completo de error handling
+
+```typescript
+import { html, render } from '@_bashell/slash'
+import { ErrorBoundary, setupGlobalErrorHandler } from '@_bashell/slash'
+
+// 1. Setup global error handler
+setupGlobalErrorHandler((error, source) => {
+  console.error(`[Global] Erro ${source}:`, error)
+
+  // Log para serviço externo
+  logToExternalService({
+    error: error.message,
+    stack: error.stack,
+    source,
+    timestamp: new Date().toISOString()
+  })
+})
+
+// 2. App com ErrorBoundary
+function App() {
+  return html`
+    <${ErrorBoundary}
+      fallback=${(error) => html`
+        <div class="app-error">
+          <h1>Erro Fatal</h1>
+          <p>A aplicação encontrou um erro inesperado.</p>
+          <button onClick=${() => window.location.reload()}>
+            Recarregar página
+          </button>
+          <details>
+            <summary>Detalhes</summary>
+            <pre>${error.stack}</pre>
+          </details>
+        </div>
+      `}
+      onError=${(error) => {
+        console.error('[App] Erro capturado:', error)
+      }}
+    >
+      <${Router} router=${router} />
+    </${ErrorBoundary}>
+  `
+}
+
+// 3. Render
+render(html`<${App} />`, document.getElementById('root')!)
+```
+
+## Best practices
+
+### 1. Use ErrorBoundary estrategicamente
+
+```typescript
+// ❌ Ruim: Um único ErrorBoundary para tudo
+function App() {
+  return html`
+    <${ErrorBoundary} fallback=${fallback}>
+      <${Header} />
+      <${Sidebar} />
+      <${MainContent} />
+      <${Footer} />
+    </${ErrorBoundary}>
+  `
+}
+
+// ✅ Bom: ErrorBoundary isolando seções críticas
+function App() {
+  return html`
+    <div>
+      <${Header} />
+
+      <${ErrorBoundary} fallback=${sidebarFallback}>
+        <${Sidebar} />
+      </${ErrorBoundary}>
+
+      <${ErrorBoundary} fallback=${contentFallback}>
+        <${MainContent} />
+      </${ErrorBoundary}>
+
+      <${Footer} />
+    </div>
+  `
+}
+```
+
+### 2. Forneça UX útil nos fallbacks
+
+```typescript
+// ❌ Ruim: Mensagem genérica
+fallback: (error) => html`<div>Erro</div>`
+
+// ✅ Bom: Informação útil + ação
+fallback: (error) => html`
+  <div class="error-widget">
+    <p>Não foi possível carregar os dados.</p>
+    <button onClick=${retry}>Tentar novamente</button>
+    <a href="/help">Precisa de ajuda?</a>
+  </div>
+`
+```
+
+### 3. Log erros para monitoramento
+
+```typescript
+import { ErrorBoundary } from '@_bashell/slash'
+
+function App() {
+  return html`
+    <${ErrorBoundary}
+      fallback=${fallback}
+      onError=${(error) => {
+        // Analytics
+        trackError(error)
+
+        // Sentry/Bugsnag/etc
+        if (typeof Sentry !== 'undefined') {
+          Sentry.captureException(error)
+        }
+
+        // Log interno
+        console.error('Error:', error)
+      }}
+    >
+      <${Content} />
+    </${ErrorBoundary}>
+  `
+}
+```
+
+### 4. Trate erros assíncronos explicitamente
+
+```typescript
+// ❌ Ruim: Erro silencioso
+async function loadData() {
+  const res = await fetch('/api/data')
+  const data = await res.json()
+  return data
+}
+
+// ✅ Bom: Tratamento explícito
+async function loadData() {
+  try {
+    const res = await fetch('/api/data')
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
+    return await res.json()
+  } catch (error) {
+    console.error('Erro ao carregar dados:', error)
+    throw error // Re-throw para que ErrorBoundary possa capturar
+  }
+}
+```
+
+### 5. Use safeRender em SSR
+
+```typescript
+import { renderToString, safeRender } from '@_bashell/slash'
+
+// No servidor
+app.get('*', (req, res) => {
+  const html = safeRender(
+    () => renderToString(html`<${App} />`),
+    (error) => {
+      // Log no servidor
+      console.error('SSR Error:', error)
+
+      // Retornar fallback UI
+      return `<div>Erro ao renderizar página</div>`
+    }
+  )
+
+  res.send(wrapHtml(html))
+})
+```
+
+## Comparação com outros frameworks
+
+| Framework | Error Boundary | Async Errors | Global Handler |
+|-----------|---------------|--------------|----------------|
+| **Slash** | ✅ `ErrorBoundary` | ✅ `catchAsync` | ✅ `setupGlobalErrorHandler` |
+| **React** | ✅ Class-based | ❌ Manual try/catch | ✅ `window.onerror` |
+| **Vue** | ✅ `errorCaptured` | ❌ Manual | ✅ `app.config.errorHandler` |
+| **Solid** | ✅ `ErrorBoundary` | ❌ Manual | ✅ `onError` |
+
+<Aside type="note">
+O Slash fornece ferramentas simples e diretas para error handling, sem complexidade desnecessária.
+</Aside>
+
+## Próximos passos
+
+- [SSR](/ssr/renderizacao/) - Error handling no servidor
+- [Componentes](/componentes/conceitos/) - Criando componentes resilientes
+- [Estado](/fundamentos/estado/) - Gerenciamento de estado com tratamento de erro
