@@ -126,7 +126,7 @@ walkAndHydrateReactiveAttributes(root, reactives)
 
 ```typescript
 // server.ts
-import { renderToString, htmlString, createState } from '@_bashell/slash'
+import { renderToString, htmlString, createState, serializeStateForScript } from '@_bashell/slash'
 
 const Counter = () => {
   const count = createState({ value: 0 })
@@ -150,9 +150,7 @@ const fullHtml = `
   </head>
   <body>
     ${html}
-    <script id="__SLASH_STATE__" type="application/json">
-      ${JSON.stringify(state)}
-    </script>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
     <script src="/client.js" type="module"></script>
   </body>
 </html>
@@ -499,9 +497,7 @@ const { html, state } = renderToString(App)
 
 const fullHtml = `
   ${html}
-  <script id="__SLASH_STATE__" type="application/json">
-  ${JSON.stringify(state)}
-  </script>
+  <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
 `
 ```
 

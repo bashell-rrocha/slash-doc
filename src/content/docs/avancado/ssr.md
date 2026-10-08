@@ -35,7 +35,7 @@ function renderToString(view: Child | (() => Child)): {
 
 Retorna um objeto contendo:
 - **html**: String HTML renderizada
-- **state**: Objeto com os estados reativos serializados (para hidratação no cliente)
+- **state**: Objeto com os valores de estado rastreados durante a renderização (para hidratação no cliente). Embuta-o na página com `serializeStateForScript(state)`, nunca com `JSON.stringify` cru dentro de `<script>`
 
 ### Exemplo Básico
 
@@ -118,10 +118,9 @@ const App = () => htmlString`<div>Funciona no servidor</div>`
 
 ### Escapando HTML
 
-O `htmlString` **escapa automaticamente** valores interpolados para prevenir XSS:
+O `htmlString` escapa valores de texto interpolados para prevenir XSS:
 
 ```typescript
-const malicious = '<script>alert("xss")</script>'
 const userInput = "João <script>alert()</script>"
 
 const App = () => htmlString`
@@ -135,6 +134,65 @@ const { html } = renderToString(App)
 //   <p>João &lt;script&gt;alert()&lt;/script&gt;</p>
 // </div>
 ```
+
+:::caution[Regra de confiança: string que começa com `<` é HTML pronto]
+No SSR, uma string (filho comum ou retornada por um reativo ou componente) que **começa com `<`** é tratada como HTML já renderizado e emitida **sem escape**. É assim que o resultado de um `htmlString` aninhado entra no pai, mas vale para qualquer string, **inclusive o resultado de `${state.get()}`**:
+
+```typescript
+const comment = createState('<img src=x onerror=alert(1)>') // dado de usuário
+
+htmlString`<p>${comment.get()}</p>`
+// <p><img src=x onerror=alert(1)></p>   <- NÃO foi escapado
+```
+
+Nunca interpole dado de usuário que possa começar com `<` sem escapá-lo antes (a saída de `htmlString` é segura).
+:::
+
+### Estado no SSR
+
+Um `State` **não é reativo** no SSR: interpolar o próprio state (`${count}`) não gera marcador nem entra no `state` retornado. Interpole o valor com `count.get()` dentro do componente.
+
+Já os reativos com `get()` + `subscribe()` (como o `Router`) são renderizados entre marcadores `<!--reactive-start:id-->`, como filhos comuns, e o valor deles **não** é gravado em `state`.
+
+### Embutindo o estado na página
+
+Use `serializeStateForScript` (exportado de `@_bashell/slash/ssr`): ele faz `JSON.stringify` e escapa `<`, `>`, `&`, U+2028 e U+2029, para que um valor não consiga fechar a tag `<script>`.
+
+```typescript
+import { htmlString, renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
+
+const { html, state } = renderToString(App)
+
+const page = `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app">${html}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`
+```
+
+### Router no SSR
+
+`Router({ router })` funciona dentro de `htmlString`/`renderToString`. Passe `initialPath` ao `createRouter` para resolver a rota no servidor:
+
+```typescript
+import { createRouter, Router } from '@_bashell/slash/router'
+import { htmlString, renderToString } from '@_bashell/slash/ssr'
+
+const router = createRouter({
+  routes: [{ path: '/', component: () => htmlString`<h1>Home</h1>` }],
+  initialPath: '/',
+})
+
+const { html } = renderToString(
+  () => htmlString`<main>${Router({ router })}</main>`,
+)
+// <main><!--reactive-start:s0--><h1>Home</h1><!--reactive-end:s0--></main>
+```
+
+O HTML da rota é emitido de verdade (não escapado) e não vai para `state`. A regra de confiança acima vale também para os componentes das rotas.
 
 ## `renderToStream()`
 
@@ -230,6 +288,8 @@ O `renderToStream()` **automaticamente inclui** um script com o estado serializa
 {"s0":42,"s1":"active"}
 </script>
 ```
+
+O conteúdo é gerado com `serializeStateForScript`, então `<`, `>` e `&` já saem escapados.
 
 ## Atributos Reativos
 
@@ -453,7 +513,7 @@ for await (const chunk of renderToStream(App)) {
 
 ```typescript
 import { Hono } from 'hono'
-import { renderToString, htmlString } from '@_bashell/slash'
+import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
 
 const app = new Hono()
 
@@ -473,9 +533,7 @@ app.get('/', (c) => {
   const { html, state } = renderToString(App)
 
   return c.html(html + `
-    <script>
-      window.__SLASH_STATE__ = ${JSON.stringify(state)}
-    </script>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
   `)
 })
 
@@ -486,7 +544,7 @@ export default app
 
 ```typescript
 import express from 'express'
-import { renderToString, htmlString } from '@_bashell/slash'
+import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
 
 const app = express()
 
@@ -504,9 +562,7 @@ app.get('/', (req, res) => {
     <html>
       <body>
         ${html}
-        <script>
-          window.__SLASH_STATE__ = ${JSON.stringify(state)}
-        </script>
+        <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
         <script src="/client.js"></script>
       </body>
     </html>
@@ -521,11 +577,13 @@ app.listen(3000)
 - ✅ Use `htmlString` (não `html`) nos componentes do servidor
 - ✅ Use `renderToString()` para SSR síncrono
 - ✅ Use `renderToStream()` para streaming SSR (melhor performance)
-- ✅ Serialize o estado reativo e injete no HTML
+- ✅ Serialize o estado com `serializeStateForScript` (nunca `JSON.stringify` cru dentro de `<script>`) e injete no HTML
+- ✅ `State` não é reativo no SSR: interpole `state.get()`
+- ✅ `Router` funciona no SSR (use `initialPath`)
 - ✅ Implemente hidratação no cliente (veja [Hydration](/avancado/hydration))
 - ✅ Event handlers são ignorados no servidor (reconectados no cliente)
 - ✅ Atributos reativos recebem marcadores `data-reactive-*`
-- ✅ HTML é escapado automaticamente para prevenir XSS
+- ✅ Texto interpolado é escapado, **exceto** strings que começam com `<` (tratadas como HTML pronto, inclusive `${state.get()}`): escape dado de usuário antes
 
 ## Próximos Passos
 

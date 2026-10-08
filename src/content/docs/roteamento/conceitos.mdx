@@ -7,7 +7,7 @@ import { Tabs, TabItem, Aside, Code } from '@astrojs/starlight/components';
 
 ## O que é o Router?
 
-O Router do Slash é um sistema de roteamento **client-side** para criar Single Page Applications (SPAs). Ele permite navegar entre diferentes "páginas" sem recarregar o browser, mantendo a URL sincronizada com o conteúdo exibido.
+O Router do Slash é um sistema de roteamento para criar Single Page Applications (SPAs). Ele permite navegar entre diferentes "páginas" sem recarregar o browser, mantendo a URL sincronizada com o conteúdo exibido.
 
 ### Características principais
 
@@ -127,13 +127,13 @@ const router = createRouter({
 
 ### `<Router>`
 
-O componente `Router` renderiza o componente da rota atual:
+O componente `Router` renderiza o componente da rota atual e se atualiza a cada navegação. Use-o como componente, em qualquer posição do template:
 
 ```typescript
 import { html, render } from '@_bashell/slash'
-import { Router } from '@_bashell/slash'
+import { Router } from '@_bashell/slash/router'
 
-const app = html`
+const App = () => html`
   <div id="app">
     <nav>
       <a href="/">Home</a>
@@ -141,13 +141,15 @@ const app = html`
     </nav>
 
     <main>
-      ${Router({ router })}
+      <${Router} router=${router} />
     </main>
   </div>
 `
 
-render(app, document.getElementById('root')!)
+render(html`<${App} />`, document.getElementById('root')!)
 ```
+
+A forma direta `${Router({ router })}` também continua válida.
 
 ### `<Link>`
 
@@ -468,8 +470,35 @@ const app = html`
 render(app, document.getElementById('root')!)
 ```
 
+## Router no servidor (SSR)
+
+Passe `initialPath` para que o roteador resolva a rota de forma síncrona na criação (no servidor e na hidratação). No cliente, sem `initialPath`, ele usa `window.location`.
+
+No servidor, `Router` funciona dentro de `htmlString`/`renderToString`: o HTML da rota é emitido de verdade, entre marcadores `<!--reactive-start:id-->`, e **não** é gravado no `state` serializado.
+
+```typescript
+import { createRouter, Router } from '@_bashell/slash/router'
+import { htmlString, renderToString } from '@_bashell/slash/ssr'
+
+const router = createRouter({
+  routes: [{ path: '/', component: () => htmlString`<h1>Home</h1>` }],
+  initialPath: '/',
+})
+
+const { html } = renderToString(
+  () => htmlString`<main>${Router({ router })}</main>`,
+)
+// <main><!--reactive-start:s0--><h1>Home</h1><!--reactive-end:s0--></main>
+```
+
+<Aside type="caution">
+No SSR, uma string que começa com `<` (filho comum ou retornada por um reativo, inclusive `${state.get()}`) é tratada como HTML já renderizado e emitida sem escape. Não devolva de uma rota ou componente texto de usuário que comece com `<` sem escapá-lo. A saída de `htmlString` é segura.
+</Aside>
+
+Veja [SSR](/avancado/ssr/) para o fluxo completo de renderização e hidratação.
+
 ## Próximos passos
 
 - [Navigation Guards](/roteamento/guards/) - Proteção e controle de navegação
 - [Rotas Aninhadas](/roteamento/nested/) - Estrutura de rotas hierárquicas
-- [SSR com Router](/ssr/roteamento/) - Roteamento no servidor
+- [SSR com Router](/avancado/ssr/) - Roteamento no servidor
