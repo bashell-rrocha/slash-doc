@@ -16,7 +16,6 @@ Esta página compara Slash e Vue em termos de sistema de reatividade, APIs, perf
 
 | Aspecto | Slash | Vue 3 |
 |---------|-------|-------|
-| **Tamanho** | ~5KB | ~34KB (runtime) |
 | **Reatividade** | Observer Pattern explícito | Proxy-based (Composition API) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
 | **Template Syntax** | HTM (JSX-like) | Template strings ou JSX |
@@ -317,172 +316,11 @@ function Timer() {
 
 ## Performance
 
-### Bundle Size
+### Benchmarks e tamanho
 
-```bash
-# Slash (produção, minified + gzip)
-@_bashell/slash: ~5KB
+Esta página não traz benchmarks nem comparação de tamanho com o Vue: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-# Vue 3 (produção, minified + gzip)
-vue: ~34KB
-```
-
-**Impacto:** Slash é ~7x menor que Vue 3.
-
-### Runtime Performance
-
-| Operação | Slash | Vue 3 | Vue 3 (compiler optimized) |
-|----------|-------|-------|---------------------------|
-| **First Render** | 8ms | 15ms | 12ms |
-| **Update (1 campo)** | 1ms | 3ms | 2ms |
-| **Update (100 campos)** | 15ms | 45ms | 25ms |
-| **List (1000 items)** | 120ms | 280ms | 180ms |
-
-**Observações:**
-- Slash é mais rápido em updates pequenos (sem VDOM diff)
-- Vue 3 compiler otimiza bastante
-- Para apps grandes, diferença diminui
-
----
-
-## Template vs HTM
-
-### Vue: Template Strings Compilados
-
-```vue
-<template>
-  <div class="container">
-    <h1>{{ title }}</h1>
-    <ul>
-      <li v-for="item in items" :key="item.id">
-        {{ item.name }}
-      </li>
-    </ul>
-  </div>
-</template>
-```
-
-**Vantagens:**
-- ✅ Syntax highlighting
-- ✅ Validação em build time
-- ✅ Otimizações do compiler
-- ✅ Familiar para quem vem de HTML
-
-**Desvantagens:**
-- ❌ Requer build step
-- ❌ Diretivas customizadas (`v-if`, `v-for`)
-- ❌ Menos flexibilidade que JS puro
-
-### Slash: HTM (Runtime)
-
-```typescript
-import { html } from '@_bashell/slash'
-
-const Component = ({ title, items }) => html`
-  <div class="container">
-    <h1>${title}</h1>
-    <ul>
-      ${items.map(item => html`
-        <li key=${item.id}>${item.name}</li>
-      `)}
-    </ul>
-  </div>
-`
-```
-
-**Vantagens:**
-- ✅ Sem build step necessário
-- ✅ JavaScript puro (map, filter, if ternário)
-- ✅ Mais flexível
-- ✅ TypeScript direto
-
-**Desvantagens:**
-- ❌ Sem otimizações de compiler
-- ❌ Parsing em runtime
-- ❌ Syntax highlighting limitado
-
-<Aside type="tip">
-Vue oferece melhor DX com compiler. Slash é mais simples e direto, sem magic.
-</Aside>
-
----
-
-## Ecossistema
-
-### Vue 3
-
-**Frameworks:**
-- Nuxt 3 (SSR/SSG framework robusto)
-- Quasar (UI framework completo)
-- Vitepress (documentação)
-
-**Bibliotecas:**
-- Pinia (state management oficial)
-- Vue Router (routing oficial)
-- VueUse (collection de composables)
-- Vuetify, Element Plus, Ant Design Vue (UI libs)
-
-**Ferramentas:**
-- Vue DevTools (excelente)
-- Vite (build tool oficial)
-- Vue Language Server
-
-### Slash
-
-**Status Atual:**
-- ✅ Router integrado
-- ✅ SSR nativo
-- ✅ Data loading isomórfico
-- 🌱 Ecossistema crescendo
-- 📦 Foco em simplicidade
-
----
-
-## Casos de Uso
-
-### Quando Usar Vue
-
-1. **Aplicações Empresariais**
-   - Necessita de ecosystem maduro
-   - UI components prontos importantes
-   - Suporte e comunidade grandes
-
-2. **Projetos com Build Pipeline**
-   - Compiler optimizations importantes
-   - Single File Components (.vue) desejado
-   - Vite/Webpack já configurado
-
-3. **Time com Experiência Vue**
-   - Developers já conhecem Vue
-   - Patterns estabelecidos
-   - Migração de Vue 2
-
-4. **Necessidade de Nuxt**
-   - SSR/SSG avançado
-   - File-based routing
-   - Modules ecosystem
-
-### Quando Usar Slash
-
-1. **Simplicidade e Performance**
-   - Bundle size crítico
-   - Performance > conveniences
-   - Sem build step desejado
-
-2. **Prototipagem Rápida**
-   - MVPs rápidos
-   - Sem setup de build
-   - Drop-in via CDN
-
-3. **Aprendizado**
-   - Entender reatividade fundamental
-   - Sem abstrações
-   - TypeScript first-class
-
-4. **Micro Frontends**
-   - Apps pequenas isoladas
-   - Baixo overhead
-   - Fácil integração
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **5,12 KB gzip** (4,48 KB brotli). O número depende do que seu app importa.
 
 ---
 
@@ -599,8 +437,7 @@ function TodoList() {
 ### Slash
 
 **Prós:**
-- ✅ Extremamente leve (~5KB)
-- ✅ Performance excelente
+- ✅ Bundle pequeno (app mínimo medido em 5,12 KB gzip, veja a seção Performance)
 - ✅ API simples e explícita
 - ✅ Sem build step necessário
 - ✅ TypeScript first-class

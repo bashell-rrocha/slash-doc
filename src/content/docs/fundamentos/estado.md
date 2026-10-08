@@ -208,7 +208,7 @@ render(html`<${Counter} />`, '#app')
 2. Quando `count.set()` muda o valor (deep equal), `count` notifica seus watchers
 3. O componente executa de novo e **seus nós anteriores são substituídos** pelos novos
 4. `get()` chamado dentro de um event handler (fora da execução do componente) não cria dependência
-5. Os states observados são os lidos na **primeira** execução: um state lido só depois de um retorno antecipado (`if (loading.get()) return ...`) não inscreve o componente. Leia todos os states no topo do componente
+5. A cada execução o componente refaz o rastreamento: passa a observar os states recém-lidos (por exemplo, depois de um `if (loading.get()) return ...`) e deixa de observar os que não leu mais. Exceção: um componente que **não leu nenhum state na primeira execução** é estático e nunca re-executa
 
 A granularidade é o componente, não o nó: não há atualização de um único `<p>`. Divida a interface em componentes pequenos para que uma mudança re-renderize só o necessário.
 

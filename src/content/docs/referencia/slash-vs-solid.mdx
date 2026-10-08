@@ -16,13 +16,11 @@ Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosof
 
 | Aspecto | Slash | SolidJS |
 |---------|-------|---------|
-| **Tamanho** | ~5KB | ~7KB |
-| **Reatividade** | Observer Pattern (manual) | Fine-grained Signals (auto) |
+| **Reatividade** | Observer Pattern (re-render por componente) | Fine-grained Signals (auto) |
 | **Virtual DOM** | ❌ Não | ❌ Não |
 | **Compiler** | ❌ Runtime-only | ✅ JSX compiler |
-| **Tracking** | Manual (`.get()`, `.watch()`) | Automático |
+| **Tracking** | Por componente (`.get()` no render; `.watch()` explícito) | Automático |
 | **SSR** | ✅ Nativo simples | ✅ Streaming avançado |
-| **Performance** | Excelente | Excelente |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Crescendo forte |
 
 <Aside type="note">
@@ -257,27 +255,11 @@ function TodoList() {
 
 ## Performance
 
-### Benchmarks
+### Benchmarks e tamanho
 
-| Operação | Slash | SolidJS |
-|----------|-------|---------|
-| **First Render** | 8ms | 7ms |
-| **Update único** | 0.8ms | 0.6ms |
-| **Update 100 campos** | 12ms | 10ms |
-| **Lista 1000 items** | 115ms | 95ms |
-| **Insert/Remove** | 18ms | 15ms |
+Esta página não traz tabelas de benchmark nem comparação de tamanho com o SolidJS: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-**Veredito:** Ambos extremamente rápidos. SolidJS ligeiramente mais rápido devido a otimizações do compiler.
-
-### Bundle Size
-
-```bash
-# Production, minified + gzip
-Slash: ~5KB
-SolidJS: ~7KB
-```
-
-**Diferença:** Slash é ~28% menor. Ambos muito leves comparados a React/Vue.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **5,12 KB gzip** e 4,48 KB brotli. O número depende do que seu app importa.
 
 ---
 
@@ -573,12 +555,10 @@ function TodoApp() {
 - ✅ JSX familiar
 - ✅ SSR avançado
 - ✅ Ecossistema crescendo forte
-- ✅ Performance top-tier
 
 **Contras:**
 - ❌ Necessita build step
 - ❌ Compiler "magic" (menos previsível)
-- ❌ Bundle ~40% maior que Slash
 - ❌ Curva de aprendizado de reactivity
 
 ### Slash
@@ -586,7 +566,7 @@ function TodoApp() {
 **Prós:**
 - ✅ 100% runtime (sem build)
 - ✅ API explícita e previsível
-- ✅ Bundle mínimo (~5KB)
+- ✅ Bundle pequeno (veja a medição em Benchmarks e tamanho)
 - ✅ Zero config
 - ✅ TypeScript first-class
 - ✅ Extremamente simples
@@ -600,9 +580,9 @@ function TodoApp() {
 
 ---
 
-## Performance: Por que ambos são rápidos?
+## Atualização sem Virtual DOM
 
-Tanto Slash quanto SolidJS são extremamente rápidos pela mesma razão fundamental:
+Slash e SolidJS não usam Virtual DOM. Os caminhos de atualização são diferentes:
 
 ### Sem Virtual DOM Diff
 
@@ -627,12 +607,6 @@ No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
   <p>Static text</p>      ← NÃO atualiza
 </div>
 ```
-
-### Resultado
-
-- ⚡ Updates instantâneos
-- 💾 Uso mínimo de memória
-- 🎯 Sem trabalho desnecessário
 
 ---
 
@@ -664,7 +638,7 @@ São tão similares em filosofia que você pode:
 - Usar Slash para libs pequenas
 - Usar Solid para apps principais
 
-Ambas são excelentes escolhas modernas para apps rápidas e eficientes!
+Ambas são escolhas modernas sem Virtual DOM; a escolha depende do modelo de reatividade e do ecossistema que você precisa.
 
 ---
 

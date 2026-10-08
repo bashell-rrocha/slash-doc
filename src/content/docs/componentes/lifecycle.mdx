@@ -37,25 +37,18 @@ render(html`<${Counter} />`, '#app')
 Como o componente re-executa, tudo que ele cria na execução é criado de novo: `createState()`, `watch()`, timers e listeners manuais. Não crie recursos de longa vida dentro do corpo do componente.
 </Aside>
 
-### Leia os states antes de qualquer retorno antecipado
+### O rastreamento é refeito a cada execução
 
-Os states que o componente observa são os lidos na **primeira** execução. Um state lido só em um ramo que ainda não rodou não inscreve o componente:
+A cada execução o componente refaz a lista de states que lê: assina os recém-lidos e deixa de observar os que não leu mais. Um state lido só depois de um retorno antecipado passa a ser observado assim que esse ramo executa:
 
 ```typescript
-// ❌ data só é lido depois do retorno antecipado: na primeira execução não é inscrito
 const Profile = () => {
-  if (loading.get()) return html`<p>Carregando...</p>`
-  return html`<p>${data.get()}</p>`
-}
-
-// ✅ leia tudo no topo
-const Profile = () => {
-  const isLoading = loading.get()
-  const value = data.get()
-  if (isLoading) return html`<p>Carregando...</p>`
-  return html`<p>${value}</p>`
+  if (loading.get()) return html`<p>Carregando...</p>`   // 1ª execução: observa só `loading`
+  return html`<p>${data.get()}</p>`                       // depois de loading=false: também observa `data`
 }
 ```
+
+A exceção é um componente cuja **primeira** execução não leu nenhum state: ele é estático (devolvido como nó simples) e nunca re-executa, mesmo que depois fosse ler states.
 
 ## O que o Slash limpa sozinho
 

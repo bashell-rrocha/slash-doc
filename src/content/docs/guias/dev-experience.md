@@ -412,19 +412,7 @@ bun run build
 
 ### Bundle Size
 
-Slash é extremamente leve:
-
-| Build | Tamanho (min+gzip) |
-|-------|-------------------|
-| Core (state + render) | ~3KB |
-| Full (com router, forms, SSR) | ~8KB |
-| Dev warnings | ~1KB (removido em prod) |
-
-**Comparação com outras libs:**
-- React: ~45KB
-- Vue: ~33KB
-- Solid: ~7KB
-- **Slash: ~8KB** ✅
+O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **5,12 KB gzip** e 4,48 KB brotli. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
 
 ## Configuração Recomendada
 

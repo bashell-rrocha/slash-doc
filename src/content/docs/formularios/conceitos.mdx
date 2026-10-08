@@ -11,7 +11,7 @@ O Slash fornece **helpers tipados** para trabalhar com formulários de forma sim
 
 ### Abordagens disponíveis
 
-1. **Manual**: Controle total usando `createState()` e event handlers
+1. **Manual**: Controle total usando `createState()` e event handlers (campos não controlados)
 2. **Two-way binding**: Helpers para sincronização automática (ex: `textFieldControl`)
 3. **Form data**: Extrair dados do form com `formToObject()` e `onSubmit()`
 
@@ -19,13 +19,50 @@ O Slash fornece **helpers tipados** para trabalhar com formulários de forma sim
 Todos os helpers exportam tipos TypeScript completos para garantir type safety.
 </Aside>
 
-## Como a reatividade funciona em formulários
+## Limitação importante: foco e re-render
 
-Um componente re-executa (e **recria seus nós**, inclusive os `<input>`) quando um state que ele leu muda. Em formulários isso importa: se o componente do form lê o state a cada tecla, o campo é recriado e perde o foco. Por isso:
+<Aside type="caution" title="Limitação conhecida">
+Quando um componente re-renderiza, o Slash **recria o DOM dele**, inclusive os `<input>`. Um campo dentro de um componente que re-renderiza a cada tecla perde o foco (e a posição do cursor) a cada tecla. Isso é uma limitação conhecida, não um bug a contornar com truques.
 
-- crie os states **fora** do componente;
-- não leia o state do campo no render do form (leia dentro dos handlers);
-- coloque as partes que mostram valores (erros, contadores, resumos) em componentes pequenos, montados com `<${Comp} />`.
+Por isso, o padrão normal para formulários **não** é "ler o state do campo no render e re-renderizar a cada tecla". Use uma destas abordagens:
+
+1. **Binding reativo**: passe ao atributo um objeto `{ get, subscribe }` (`value=${reactive}`). O atributo é atualizado no lugar, sem recriar o `<input>`. É o que `textFieldControl`, `checkboxControl`, `radioControl` e `SelectControl` fazem.
+2. **Campos não controlados**: sem `value=`; o state é atualizado nos handlers e lido só no envio.
+
+Em qualquer caso, mostre valores derivados (erros, contadores, resumos) em componentes pequenos montados com `<${Comp} />`, e crie os states **fora** dos componentes.
+</Aside>
+
+## Binding reativo (`value=${reactive}`)
+
+Um objeto com `get()` e `subscribe(fn)` (o contrato `Reactive`) como valor de atributo mantém o elemento em sincronia com o state, sem re-render:
+
+```typescript
+import { html, createState, render } from '@_bashell/slash'
+
+const name = createState({ value: '' })
+
+// Reactive derivado do state: { get, subscribe }
+const nameValue = {
+  get: () => name.get().value,
+  subscribe: (fn: (v: string) => void) => name.watch((s) => fn(s.value)),
+}
+
+function NameField() {
+  return html`
+    <input
+      value=${nameValue}
+      onInput=${(e: Event) => name.set({ value: (e.target as HTMLInputElement).value })}
+    />
+  `
+}
+
+// Chamada direta: o <input> é atualizado no lugar e mantém o foco
+render(NameField(), '#app')
+```
+
+<Aside type="note">
+Verificado: com a chamada direta (`render(NameField(), ...)`) o mesmo `<input>` permanece ao digitar. Se o formulário for montado como componente (`<${NameField} />`), a construção do elemento lê `get()` dentro do componente, que passa a depender do state e **recria** o campo a cada mudança. Construa os campos com binding reativo fora de componentes que re-renderizam (por exemplo, direto no `render()` ou dentro de um elemento estático). Veja um uso real em `slash-spa`, `src/pages/Tasks.tsx`.
+</Aside>
 
 ## Formulário básico (manual)
 

@@ -16,13 +16,11 @@ Esta página compara Slash e React em termos de arquitetura, performance, DX (De
 
 | Aspecto | Slash | React |
 |---------|-------|-------|
-| **Tamanho** | ~5KB | ~42KB (React + ReactDOM) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
 | **Reatividade** | Observer Pattern (re-render por componente que lê o state) | Re-render component tree |
 | **SSR** | ✅ Nativo | ✅ Sim (com frameworks) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro e extenso |
 | **Curva de Aprendizado** | Baixa | Média |
-| **Performance** | Excelente | Boa (com otimizações) |
 | **Tooling** | TypeScript nativo | Excelente (DevTools, etc) |
 
 ---
@@ -103,47 +101,11 @@ A principal diferença: React reconcilia uma árvore virtual, Slash substitui os
 
 ## Performance
 
-### Bundle Size
+### Benchmarks e tamanho
 
-```bash
-# Slash (produção, minified + gzip)
-@_bashell/slash: ~5KB
+Esta página não traz benchmarks nem comparação de tamanho com o React: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-# React (produção, minified + gzip)
-react + react-dom: ~42KB
-```
-
-**Impacto:** Slash é ~8x menor, crucial para mobile e slow networks.
-
-### Runtime Performance
-
-<Tabs>
-  <TabItem label="Benchmark: 10.000 Updates">
-
-**Cenário:** 10.000 updates em lista de 1.000 itens
-
-| Biblioteca | Tempo | Memória |
-|------------|-------|---------|
-| **Slash** | 120ms | 15MB |
-| **React** | 380ms | 45MB |
-| **React (memo)** | 180ms | 30MB |
-
-  </TabItem>
-
-  <TabItem label="Benchmark: Deep Tree">
-
-**Cenário:** Árvore de componentes 10 níveis de profundidade
-
-| Biblioteca | First Render | Re-render |
-|------------|--------------|-----------|
-| **Slash** | 8ms | 2ms |
-| **React** | 18ms | 12ms |
-| **React (memo)** | 18ms | 4ms |
-
-  </TabItem>
-</Tabs>
-
-**Veredito:** Slash é mais rápido por padrão. React precisa de otimizações (`memo`, `useMemo`, `useCallback`) para competir.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido: **5,12 KB gzip** (4,48 KB brotli). O número depende do que seu app importa.
 
 ---
 
@@ -497,8 +459,7 @@ function TodoItem({ todo, onToggle }) {
 ### Slash
 
 **Prós:**
-- ✅ Extremamente leve (~5KB)
-- ✅ Performance excelente por padrão
+- ✅ Bundle pequeno (app mínimo medido em 5,12 KB gzip, veja a seção Performance)
 - ✅ API minimalista e direta
 - ✅ SSR nativo
 - ✅ TypeScript first-class

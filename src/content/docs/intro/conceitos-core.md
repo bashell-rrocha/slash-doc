@@ -107,10 +107,9 @@ Quando `count.set()` é chamado, os componentes que leram `count.get()` durante 
 | Característica | Slash | React | Vue | Solid |
 |----------------|-------|-------|-----|-------|
 | VDOM | ❌ | ✅ | ✅ | ❌ |
-| Reatividade | createState + Auto-tracking | Hooks/VDOM | Reactivity API | Fine-grained Signals |
+| Reatividade | createState + re-render por componente | Hooks/VDOM | Reactivity API | Fine-grained Signals |
 | SSR Nativo | ✅ | ✅ | ✅ | ✅ |
 | JSX sem build | ✅ (htm) | ❌ | ❌ | ❌ |
-| Bundle size | ~10KB | ~45KB | ~35KB | ~7KB |
 | TypeScript | ✅ | ✅ | ✅ | ✅ |
 | Imutabilidade | ✅ (deep clone) | ❌ | ❌ | ❌ |
 | FCIS Pattern | ✅ | ❌ | ❌ | ❌ |
