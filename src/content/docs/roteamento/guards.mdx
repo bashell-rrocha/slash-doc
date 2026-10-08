@@ -115,6 +115,23 @@ const router = createRouter({
 })
 ```
 
+## Guards na URL inicial
+
+No navegador, a navegação inicial passa pelos mesmos guards (globais e da rota), com redirects, e usa `replace` (não empilha histórico). `router.ready` é uma `Promise<void>` que resolve quando ela termina.
+
+- **URL do navegador** (`window.location`, ou `location.hash` em `mode: 'hash'`): com guard aplicável, o estado inicial é `currentRoute: null, isNavigating: true` até a decisão, então nada protegido é renderizado antes. Depois vem a rota, o destino do redirect ou, se o guard bloquear, `currentRoute: null`.
+- **`initialPath` e hidratação**: a rota é aplicada de forma síncrona (o markup do SSR é mantido) e os guards rodam em seguida; se bloquearem, `currentRoute` vira `null`; se redirecionarem, o roteador segue o redirect.
+- **SSR** (sem navegador): os guards não rodam.
+- Cada navegação segue no máximo **10 redirects**; acima disso o roteador registra um erro e deixa `currentRoute: null`. Uma navegação mais nova substitui uma pendente.
+
+```typescript
+await router.ready // navegação inicial concluída
+```
+
+<Aside type="caution">
+Guards no cliente são UX: eles escolhem o que o navegador mostra, não protegem dados. A autorização precisa acontecer no servidor.
+</Aside>
+
 ## Ordem de execução
 
 Guards são executados nesta ordem:
@@ -345,12 +362,11 @@ const router = createRouter({
 import { createState } from '@_bashell/slash'
 
 const hasUnsavedChanges = createState(false)
+let content = '' // texto em edição: não é lido no render, então o <textarea> não é recriado
 
 function Editor({ router }) {
-  const content = createState('')
-
   const handleInput = (e: Event) => {
-    content.set((e.target as HTMLTextAreaElement).value)
+    content = (e.target as HTMLTextAreaElement).value
     hasUnsavedChanges.set(true)
   }
 
@@ -363,7 +379,7 @@ function Editor({ router }) {
   return html`
     <div>
       <h1>Editor</h1>
-      <textarea onInput=${handleInput}>${content}</textarea>
+      <textarea onInput=${handleInput}></textarea>
       <button onClick=${handleSave}>Salvar</button>
     </div>
   `

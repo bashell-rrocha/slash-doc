@@ -30,15 +30,15 @@ function h(
   tag: string | Function,
   props?: Props | null,
   ...children: Child[]
-): VNode
+): Node
 ```
 
 **Parâmetros:**
 - `tag`: Nome da tag HTML ou componente funcional
 - `props`: Propriedades do elemento (opcional)
-- `children`: Filhos do elemento (podem ser strings, números, VNodes, arrays)
+- `children`: Filhos do elemento (strings, números, `Node`s, arrays, reativos)
 
-**Retorna:** `VNode` - Representação virtual do elemento
+**Retorna:** `Node` - o elemento DOM real (o Slash não tem VNodes)
 
 **Exemplo:**
 ```typescript
@@ -54,7 +54,7 @@ const element = h('div', { class: 'container' },
 
 ### `html`
 
-Template tag que converte template strings em VNodes usando HTM.
+Template tag (HTM) que converte template strings em nós DOM. Seu tipo de retorno é `Child`; na prática, um `Node` (ou array de nós).
 
 ```typescript
 const html: HTMTemplate
@@ -95,18 +95,20 @@ const element = html`
 
 ### `render()`
 
-Monta um VNode no DOM.
+Monta uma view no DOM. Se o container já tiver HTML do servidor e a página tiver o script `__SLASH_STATE__`, hidrata (veja [Hydration](/avancado/hydration/)).
 
 ```typescript
 function render(
-  vnode: VNode,
-  container: HTMLElement
-): void
+  view: Child | (() => Child),
+  container: Element | string | null | undefined
+): Node | Node[]
 ```
 
 **Parâmetros:**
-- `vnode`: VNode para renderizar
-- `container`: Elemento DOM onde montar
+- `view`: o que renderizar (um `Child`, ou uma função que o retorna)
+- `container`: elemento DOM ou seletor CSS (`'#app'`). Lança erro se o seletor não encontrar elemento
+
+**Retorna:** o `Node` (ou `Node[]`) montado.
 
 **Exemplo:**
 ```typescript
@@ -149,7 +151,7 @@ if (element) {
 
 ### `createState()`
 
-Cria um estado reativo com observadores.
+Cria um container de estado observável: watchers são notificados quando o valor muda e componentes que leem o estado com `get()` re-renderizam automaticamente (monte-os como `<${Comp} />`). Passar o próprio `State` como child ou prop (`${count}`) **não** é reativo: use `${count.get()}` dentro de um componente.
 
 ```typescript
 function createState<T>(
@@ -165,8 +167,8 @@ function createState<T>(
 **Opções:**
 ```typescript
 interface StateOptions {
-  history?: boolean      // Habilita histórico (time-travel debug)
-  maxHistory?: number    // Número máximo de histórico (padrão: 50)
+  enableHistory?: boolean   // Habilita histórico (time-travel debug)
+  historyMaxSize?: number   // Tamanho máximo do histórico (padrão: 100)
 }
 ```
 
@@ -210,7 +212,7 @@ console.log(count.get()) // 5
 Registra um observador que é chamado quando o estado muda.
 
 ```typescript
-watch(callback: (newValue: T, oldValue: T) => void): () => void
+watch(callback: (newValue: T) => void): () => void
 ```
 
 **Parâmetros:**
@@ -222,49 +224,50 @@ watch(callback: (newValue: T, oldValue: T) => void): () => void
 ```typescript
 const count = createState(0)
 
-const unwatch = count.watch((newVal, oldVal) => {
-  console.log(`Changed from ${oldVal} to ${newVal}`)
+const unwatch = count.watch((newVal) => {
+  console.log(`Changed to ${newVal}`)
 })
 
-count.set(5) // Logs: "Changed from 0 to 5"
+count.set(5) // Logs: "Changed to 5"
 
 // Remover observador
 unwatch()
 ```
 
+**Ordem e reentrância:** watchers são notificados na ordem de registro. Se um watcher chamar `set()` no mesmo estado durante a notificação, vale o **último valor**: a notificação aninhada entrega o valor atual a todos os watchers e a notificação antiga é interrompida, então nenhum watcher recebe um valor velho depois do novo. Watchers anteriores ao que fez o `set` veem o valor antigo e depois o novo. `set` segue síncrono, e um erro lançado na notificação aninhada chega a quem chamou `set`.
+
 **Exemplo Completo:**
 ```typescript
-import { createState, html } from '@_bashell/slash'
+import { createState, html, render } from '@_bashell/slash'
 
-const count = createState(0, { history: true })
+const count = createState(0, { enableHistory: true })
 
 // Componente que usa estado
-const Counter = () => {
-  const value = count.get()
+const Counter = () => html`
+  <div>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
+      Increment
+    </button>
+  </div>
+`
 
-  return html`
-    <div>
-      <p>Count: ${value}</p>
-      <button onclick=${() => count.set(value + 1)}>
-        Increment
-      </button>
-    </div>
-  `
-}
+// Monte como <${Counter} />: chamado diretamente (Counter()), o componente não é reativo
+render(html`<${Counter} />`, '#app')
 ```
 
 ---
 
 ### `batch()`
 
-Agrupa múltiplas atualizações de estado em um único ciclo de renderização.
+Agrupa múltiplas atualizações de estado: cada estado alterado notifica seus watchers **uma única vez**, com o **valor final**, no fim do batch mais externo.
 
 ```typescript
 function batch(fn: () => void): void
 ```
 
 **Parâmetros:**
-- `fn`: Função que contém as atualizações
+- `fn`: Função **síncrona** que contém as atualizações
 
 **Exemplo:**
 ```typescript
@@ -273,20 +276,29 @@ import { createState, batch } from '@_bashell/slash'
 const name = createState('')
 const age = createState(0)
 
-// Sem batch: 2 renders
+name.watch((v) => console.log('name:', v))
+age.watch((v) => console.log('age:', v))
+
+// Sem batch: cada set notifica na hora
 name.set('John')
 age.set(30)
 
-// Com batch: 1 render
+// Com batch: uma notificação por estado alterado, no fim
 batch(() => {
-  name.set('John')
-  age.set(30)
+  name.set('Jane')
+  name.set('Joan') // só 'Joan' é notificado
+  age.set(31)
 })
 ```
 
-<Aside type="tip">
-Use `batch()` sempre que atualizar múltiplos estados relacionados para melhor performance.
-</Aside>
+**Semântica:**
+- Só notificam os estados cujo valor mudou; sem mudança, ninguém é notificado.
+- Batches aninhados notificam apenas no fim do batch mais externo.
+- Erros de watchers são isolados: todos os watchers rodam e o primeiro erro é relançado no final.
+- Se `fn` lançar, as notificações do que já mudou ainda acontecem e o erro chega a quem chamou `batch`.
+- `batch` não funciona com funções assíncronas.
+
+Detalhes em [Batch Updates](/fundamentos/batch/).
 
 ---
 
@@ -294,83 +306,185 @@ Use `batch()` sempre que atualizar múltiplos estados relacionados para melhor p
 
 ### `renderToString()`
 
-Renderiza um VNode para string HTML (síncrono).
+Renderiza uma view para HTML (síncrono) e devolve também o estado a serializar.
 
 ```typescript
-function renderToString(vnode: VNode): string
+function renderToString(view: Child | (() => Child)): {
+  html: string
+  state: Record<string, unknown>
+}
 ```
 
 **Parâmetros:**
-- `vnode`: VNode para renderizar
+- `view`: filho ou função que retorna o filho (use `htmlString` nos templates)
 
-**Retorna:** String HTML
+**Retorna:** `{ html, state }`. Reativos com `get()` + `subscribe()` (como o `Router`) são emitidos entre marcadores `<!--reactive-start:id-->` sem gravar o valor em `state`. Um `State` **não** é reativo no SSR: interpole `state.get()` para renderizar o valor.
 
 **Exemplo:**
 ```typescript
-import { html, renderToString } from '@_bashell/slash'
+import { htmlString, renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 
-const App = html`<h1>Hello SSR</h1>`
-const htmlString = renderToString(App)
+const { html, state } = renderToString(() => htmlString`<h1>Hello SSR</h1>`)
 
-console.log(htmlString) // "<h1>Hello SSR</h1>"
+const page = `<div id="app">${html}</div>
+<script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>`
 ```
+
+`html` é sempre uma `string`. Monte o documento (`<!DOCTYPE>`, `<head>`, scripts) com um template literal comum; o que você colocar nele à mão (um título, por exemplo) precisa ser escapado por você.
+
+<Aside type="caution">
+No SSR toda string é escapada, inclusive `${state.get()}` e strings devolvidas por componentes. Marcação confiável exige `unsafeHtml(...)`. Veja [Segurança](/fundamentos/seguranca/).
+</Aside>
+
+---
+
+### `serializeStateForScript()`
+
+Serializa o `state` para uso dentro de `<script type="application/json">`.
+
+```typescript
+function serializeStateForScript(state: unknown): string
+```
+
+Faz `JSON.stringify` e escapa `<`, `>`, `&`, U+2028 e U+2029, para que os valores não possam fechar a tag `<script>`. Use sempre no lugar de `JSON.stringify` cru.
 
 ---
 
 ### `renderToStream()`
 
-Renderiza um VNode para stream (para grandes páginas).
+Renderiza uma view em chunks (async generator de strings). O último chunk é a tag `<script id="__SLASH_STATE__">` com o estado já serializado.
 
 ```typescript
-function renderToStream(vnode: VNode): ReadableStream
+function renderToStream(
+  view: Child | (() => Child)
+): AsyncGenerator<string, void, unknown>
 ```
 
-**Parâmetros:**
-- `vnode`: VNode para renderizar
-
-**Retorna:** `ReadableStream` que pode ser pipeado
-
-**Exemplo (Node.js):**
+**Exemplo:**
 ```typescript
-import { html, renderToStream } from '@_bashell/slash'
-import { Writable } from 'stream'
+import { htmlString, renderToStream } from '@_bashell/slash/ssr'
 
-const App = html`<h1>Hello Streaming</h1>`
-const stream = renderToStream(App)
+const App = () => htmlString`<h1>Hello Streaming</h1>`
 
 response.writeHead(200, { 'Content-Type': 'text/html' })
-stream.pipe(response)
+for await (const chunk of renderToStream(App)) {
+  response.write(chunk)
+}
+response.end()
 ```
 
 ---
 
 ### `htmlString`
 
-Template tag para criar strings HTML seguras com escapamento.
+Template tag que renderiza HTML no servidor e devolve um `SafeHtml`. **Toda** string interpolada é escapada. Templates `htmlString` aninhados, componentes e listas de templates (`items.map(...)`) entram no pai sem escape duplo porque são `SafeHtml`.
 
 ```typescript
-const htmlString: (strings: TemplateStringsArray, ...values: any[]) => string
+const htmlString: (strings: TemplateStringsArray, ...values: unknown[]) => SafeHtml
 ```
 
 **Uso:**
 ```typescript
-import { htmlString } from '@_bashell/slash'
+import { htmlString } from '@_bashell/slash/ssr'
 
-const title = 'My Page'
-const html = htmlString`
-  <!DOCTYPE html>
-  <html>
-    <head><title>${title}</title></head>
-    <body>
-      <div id="app"></div>
-    </body>
-  </html>
-`
+const title = 'My Page <script>'
+const page = htmlString`<h1>${title}</h1>`
+String(page)
+// <h1>My Page &lt;script&gt;</h1>
+```
+
+Use `String(page)` (ou `renderToString(() => page).html`) quando precisar de uma `string`. Valores dinâmicos dentro de `<script>`/`<style>` são descartados (com aviso em dev); para JSON use `unsafeHtml(serializeStateForScript(dados))`. Um `<` literal dentro de um `<script>` estático do template é lido como tag (limitação do htm): coloque esse código em `unsafeHtml(...)`.
+
+---
+
+### `unsafeHtml()`
+
+Marca uma string como **marcação confiável**, para ser emitida como HTML sem escape. Funciona em `html` (cliente) e em `htmlString` (servidor).
+
+```typescript
+function unsafeHtml(html: string): SafeHtml
+```
+
+```typescript
+import { html, unsafeHtml } from '@_bashell/slash/core'
+
+html`<button>${unsafeHtml('<svg viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>')} Salvar</button>`
 ```
 
 <Aside type="caution">
-`htmlString` escapa automaticamente valores interpolados para prevenir XSS.
+`unsafeHtml` **não sanitiza**. Significa "eu garanto este valor". Nunca passe entrada de usuário por ele; se o conteúdo vem de usuários (Markdown, CMS), passe antes por um sanitizador de verdade. Também é a saída para `srcdoc` (`srcdoc=${unsafeHtml(...)}`). Exportado de `@_bashell/slash/core` e `@_bashell/slash/ssr`.
 </Aside>
+
+---
+
+### `isSafeHtml()` e `SafeHtml`
+
+```typescript
+function isSafeHtml(x: unknown): x is SafeHtml
+```
+
+`SafeHtml` é o tipo devolvido por `htmlString` e `unsafeHtml`; `toString()` devolve a marcação. `isSafeHtml` não pode ser enganado por JSON vindo da rede (a marca é uma propriedade própria com `Symbol.for`). Um `SafeHtml` guardado em estado reativo perde a marca ao ser serializado para hidratação e volta como texto; reembrulhe com `unsafeHtml` no cliente.
+
+---
+
+### `unsafeUrl()`
+
+Marca uma URL **confiável** cujo esquema a política de URLs bloqueia (por exemplo `myapp://abrir/42`).
+
+```typescript
+function unsafeUrl(url: string): SafeUrl
+```
+
+```typescript
+import { html, unsafeUrl } from '@_bashell/slash/core'
+
+html`<a href=${unsafeUrl('myapp://abrir/42')}>Abrir no app</a>`
+```
+
+<Aside type="caution">
+`unsafeUrl` **não sanitiza** e só tem efeito em atributos de URL (`href`, `src`, `action`...) e no `content` de `<meta http-equiv="refresh">`; em qualquer outro atributo o valor é tratado como string comum. Nunca passe URL vinda de usuário.
+</Aside>
+
+---
+
+### `isSafeUrl()` e `SafeUrl`
+
+```typescript
+function isSafeUrl(x: unknown): x is SafeUrl
+```
+
+`SafeUrl` é o tipo devolvido por `unsafeUrl`. Assim como no `SafeHtml`, a marca não é forjável por JSON e se perde ao serializar estado para hidratação (a URL volta a ser sanitizada).
+
+Veja a política completa de URLs em [Segurança](/fundamentos/seguranca/).
+
+---
+
+### `sanitizeUrl()` e `BLOCKED_URL`
+
+```typescript
+function sanitizeUrl(attr: string, value: string, tag?: string): string
+const BLOCKED_URL: 'about:blank#blocked'
+```
+
+Aplica a política de URLs do Slash a um valor e devolve o próprio valor ou `BLOCKED_URL`. Exportados por `@_bashell/slash/core` e `@_bashell/slash/ssr`. `attr` é o nome do atributo (`'href'`, `'src'`...) e `tag` (opcional, por exemplo `'img'`) importa porque `blob:` e `data:image/svg+xml` só passam em contextos de imagem e mídia. Em dev, um valor bloqueado emite o mesmo aviso dos templates.
+
+```typescript
+import { sanitizeUrl, BLOCKED_URL } from '@_bashell/slash/core'
+
+const base = new URL('https://app.example.com')
+
+function destinoSeguro(next: string): string {
+  if (sanitizeUrl('href', next) === BLOCKED_URL) return '/'
+  try {
+    const url = new URL(next, base)
+    return url.origin === base.origin ? url.pathname + url.search + url.hash : '/'
+  } catch {
+    return '/'
+  }
+}
+```
+
+`sanitizeUrl` valida o **esquema**, não o destino: `//evil.com` e `https://evil.com` passam. Para um redirect, confira também a origem, como acima.
 
 ---
 
@@ -378,114 +492,101 @@ const html = htmlString`
 
 ### `createLoader()`
 
-Cria um loader isomórfico para data fetching.
+Cria um loader isomórfico com cache no cliente. No servidor o loader sempre executa (sem cache).
 
 ```typescript
-function createLoader<T, Args extends any[] = []>(
-  fetchFn: (...args: Args) => T | Promise<T>,
-  options?: LoaderOptions
-): LoaderFunction<T, Args>
+function createLoader<T>(
+  fn: (ctx: LoaderContext) => T | Promise<T>,
+  options: LoaderOptions
+): (ctx: LoaderContext) => Promise<T>
 ```
 
-**Parâmetros:**
-- `fetchFn`: Função que carrega os dados
-- `options`: Configurações do loader
-
-**Opções:**
+**Contexto e opções:**
 ```typescript
-interface LoaderOptions {
-  ttl?: number                              // Tempo de vida do cache (ms)
-  key?: (...args: any[]) => string         // Função para gerar chave de cache
-  onError?: (error: Error) => void         // Callback de erro
-  staleWhileRevalidate?: boolean           // Retorna cache stale enquanto revalida
+type LoaderContext = {
+  params: Record<string, string>
+  request?: Request
+  isServer: boolean
+}
+
+type LoaderOptions = {
+  key: string          // identifica o loader no cache (obrigatório)
+  ttl?: number         // tempo de vida do cache em ms (padrão: 5 minutos)
+  revalidate?: boolean // ignora o cache e executa de novo
 }
 ```
 
-**Retorna:** Função loader que pode ser chamada para carregar dados
+A chave de cache no cliente é `` `${key}:${JSON.stringify(ctx.params)}` ``.
 
 **Exemplo:**
 ```typescript
 import { createLoader } from '@_bashell/slash'
 
-interface User {
-  id: string
-  name: string
-}
-
-const userLoader = createLoader<User>(
-  async (id: string) => {
-    const res = await fetch(`/api/users/${id}`)
+const userLoader = createLoader(
+  async ({ params }) => {
+    const res = await fetch(`/api/users/${params.id}`)
     return res.json()
   },
-  {
-    ttl: 5 * 60 * 1000, // 5 minutos
-    key: (id) => `user:${id}`
-  }
+  { key: 'user', ttl: 5 * 60 * 1000 }
 )
 
-// Uso
-const user = userLoader('123') // Carrega e cacheia
-const sameUser = userLoader('123') // Retorna do cache
+// Uso (assíncrono)
+const user = await userLoader({ params: { id: '123' }, isServer: false }) // carrega e cacheia
+const same = await userLoader({ params: { id: '123' }, isServer: false }) // vem do cache
 ```
 
 ---
 
 ### `invalidateLoader()`
 
-Invalida o cache de um loader.
+Limpa o cache de loaders no cliente.
 
 ```typescript
-function invalidateLoader<T, Args extends any[]>(
-  loader: LoaderFunction<T, Args>,
-  ...args: Args
-): void
+function invalidateLoader(key?: string): void
 ```
 
 **Parâmetros:**
-- `loader`: Loader para invalidar
-- `args`: Argumentos para gerar a chave (opcional)
+- `key`: `key` do loader cujas entradas serão removidas (opcional). Sem argumento, limpa todo o cache.
 
-**Exemplo:**
 ```typescript
 import { invalidateLoader } from '@_bashell/slash'
 
-// Invalida cache específico
-invalidateLoader(userLoader, '123')
-
-// Invalida todo o cache do loader
-invalidateLoader(userLoader)
+invalidateLoader('user') // todas as entradas do loader com key 'user'
+invalidateLoader()       // todo o cache
 ```
+
+---
+
+### `serializeLoaderData()` e `deserializeLoaderData()`
+
+```typescript
+function serializeLoaderData(data: Record<string, unknown>): string // JSON.stringify + escape para <script>
+function deserializeLoaderData(serialized: string): Record<string, unknown> // {} se inválido
+```
+
+<Aside type="caution">
+`serializeLoaderData` escapa `<`, `>`, `&`, U+2028 e U+2029 (igual a `serializeStateForScript`), então é seguro dentro de `<script type="application/json">`. Um valor de nível superior que não seja JSON vira `"null"`.
+</Aside>
 
 ---
 
 ### `hydrateLoaderCache()`
 
-Obtém o cache de loaders para hidratação no cliente.
+Injeta no cache do cliente dados que vieram do servidor.
 
 ```typescript
-function hydrateLoaderCache(): Record<string, any>
+function hydrateLoaderCache(data: Record<string, unknown>): void
 ```
 
-**Retorna:** Objeto com cache de todos os loaders
-
-**Exemplo (Servidor):**
+**Exemplo (Cliente):**
 ```typescript
-import { hydrateLoaderCache } from '@_bashell/slash'
+import { hydrateLoaderCache, deserializeLoaderData } from '@_bashell/slash'
 
-const cache = hydrateLoaderCache()
-
-const html = htmlString`
-  <!DOCTYPE html>
-  <html>
-    <head>
-      <script>
-        window.__LOADER_CACHE__ = ${JSON.stringify(cache)};
-      </script>
-    </head>
-    <body>...</body>
-  </html>
-`
+const serialized = document.getElementById('__LOADER_DATA__')?.textContent || '{}'
+hydrateLoaderCache(deserializeLoaderData(serialized))
 ```
+
+**Exemplo (Servidor):** veja [Data Loading](/avancado/data-loading/).
 
 ---
 
@@ -518,181 +619,108 @@ if (isServer()) {
 
 ### `createRouter()`
 
-Cria uma instância de router.
+Cria um roteador. O retorno é um `State<RouterState>` com métodos extras de navegação.
 
 ```typescript
-function createRouter(config: RouterConfig): Router
+function createRouter(config: RouterConfig): RouterInstance
 ```
 
 **Configuração:**
 ```typescript
-interface RouterConfig {
-  mode?: 'hash' | 'history'              // Modo de navegação (padrão: 'hash')
-  routes: RouteConfig[]                   // Definição de rotas
-  scrollBehavior?: (to, from) => ScrollPosition
-  beforeEach?: (to, from) => boolean | { redirect: string }
-  afterEach?: (to, from) => void
+type RouterConfig = {
+  routes: RouteConfig[]
+  mode?: 'history' | 'hash'      // padrão: 'history'
+  fallback?: string              // caminho usado quando nenhuma rota casa
+  guards?: NavigationGuard[]     // guards globais
+  initialPath?: string           // caminho inicial (SSR e hidratação)
 }
 
-interface RouteConfig {
-  path: string                            // Caminho da rota
-  component: () => VNode | Promise<VNode> // Componente (pode ser lazy)
-  beforeEnter?: (to, from) => boolean | { redirect: string }
-  meta?: Record<string, any>              // Metadados customizados
+type RouteConfig = {
+  path: string                          // ex.: '/users/:id'
+  component: (state: RouterState) => any
+  name?: string
+  meta?: Record<string, any>
+  guards?: NavigationGuard[]            // guards desta rota
+  children?: RouteConfig[]              // rotas aninhadas
 }
 ```
 
+Um guard recebe `(to, from)` e retorna `void`/`true` (permite), `false` (bloqueia) ou uma `string` (redireciona). Não há lazy loading, data loaders nem curingas (`*`): use `fallback` para o 404.
+
 **Exemplo:**
 ```typescript
-import { createRouter } from '@_bashell/slash'
+import { html, render } from '@_bashell/slash'
+import { createRouter, Router, Link } from '@_bashell/slash/router'
 
 const router = createRouter({
   mode: 'history',
+  fallback: '/404',
   routes: [
-    {
-      path: '/',
-      component: () => import('./pages/Home')
-    },
-    {
-      path: '/users/:id',
-      component: () => import('./pages/UserDetail'),
-      meta: { requiresAuth: true }
-    }
+    { path: '/', component: () => html`<h1>Home</h1>` },
+    { path: '/users/:id', component: (state) => html`<h1>User ${state.params.id}</h1>`, meta: { requiresAuth: true } },
+    { path: '/404', component: () => html`<h1>Not found</h1>` },
   ],
-  beforeEach: (to, from) => {
-    console.log(`Navigating to ${to.path}`)
-    return true
-  }
+  guards: [(to) => { console.log(`Navigating to ${to.path}`) }],
 })
 
-router.init()
+const App = () => html`
+  <div>
+    <nav><${Link} to="/" router=${router}>Home<//></nav>
+    <main><${Router} router=${router} /></main>
+  </div>
+`
+
+render(html`<${App} />`, '#app')
 ```
 
 ---
 
 ### `Router` Component
 
-Componente que renderiza a rota atual.
+Renderiza o `component` da rota atual e se atualiza a cada navegação. É um reativo (`get()` + `subscribe()`), então funciona como componente em qualquer posição do template.
 
 ```typescript
-function Router(props: { router: Router }): VNode
+html`<${Router} router=${router} />`
+// a forma direta também é válida: ${Router({ router })}
 ```
 
-**Uso:**
-```typescript
-import { html, Router } from '@_bashell/slash'
-import { router } from './router'
-
-const App = html`
-  <div>
-    <nav>...</nav>
-    ${Router({ router })}
-  </div>
-`
-```
+No servidor, `Router` funciona dentro de `htmlString`/`renderToString`: o HTML da rota é emitido entre marcadores `<!--reactive-start:id-->` e não é gravado em `state`. Passe `initialPath` ao `createRouter` para resolver a rota no servidor. Veja [SSR](/avancado/ssr/).
 
 ---
 
 ### `Link` Component
 
-Componente para navegação client-side.
+Renderiza um `<a href>` cujo clique é interceptado e chama `router.push()`. Props extras (como `class`) são repassadas ao `<a>`.
 
 ```typescript
-function Link(props: LinkProps): VNode
-
-interface LinkProps {
-  to: string | { path: string; query?: Record<string, string> }
-  class?: string
-  activeClass?: string
-  children: Child | Child[]
-}
+html`<${Link} to="/about" router=${router} class="nav-link">About<//>`
 ```
 
-**Uso:**
+**Props:** `to: string`, `router: RouterInstance` (obrigatório), `external?: boolean` e `children`.
+
+`to` precisa ser um caminho do app (`/x`, `?q` ou `#h`). Qualquer outra coisa (`./x`, `../x`, `about`, `//host`, `javascript:`, `https://...`) não navega: o clique recebe `preventDefault` e o `href` vira `about:blank#blocked`. Para um site externo, use `external`: só libera `http(s)`, `mailto:`, `sms:` e `tel:` e adiciona `rel="noopener noreferrer"`.
+
 ```typescript
-import { Link } from '@_bashell/slash'
-
-const Nav = html`
-  <nav>
-    ${Link({ to: '/', children: 'Home' })}
-    ${Link({ to: '/about', children: 'About' })}
-    ${Link({
-      to: { path: '/users', query: { page: '1' } },
-      children: 'Users'
-    })}
-  </nav>
-`
+html`<${Link} to="https://example.com/docs" external router=${router}>Docs<//>`
+// <a href="https://example.com/docs" rel="noopener noreferrer">Docs</a>
 ```
+
+`?q` e `#h` são relativos à página atual. O roteador só intercepta cliques em links `http(s)` da mesma origem (respeitando `<base>`); com ctrl, meta, shift ou alt, botão que não seja o esquerdo, `target` diferente de `_self` ou `download`, o navegador age normalmente. Se o navegador recusar um `router.push()`/`replace()`, a promise rejeita com `Navigation failed: ...` e o estado do roteador continua igual à URL.
 
 ---
 
-### Router Instance Methods
-
-#### `router.push()`
-
-Navega para uma rota programaticamente.
+### Router Instance
 
 ```typescript
-push(location: string | { path: string; query?: Record<string, string> }): void
-```
+router.get()                       // { currentRoute, params, query, meta, isNavigating }
+router.watch((state) => { /* ... */ })
 
-**Exemplo:**
-```typescript
-router.push('/about')
-router.push({ path: '/users', query: { page: '2' } })
-```
-
-#### `router.replace()`
-
-Substitui a rota atual (não adiciona ao histórico).
-
-```typescript
-replace(location: string | { path: string; query?: Record<string, string> }): void
-```
-
-#### `router.back()`
-
-Volta uma página no histórico.
-
-```typescript
-back(): void
-```
-
-#### `router.forward()`
-
-Avança uma página no histórico.
-
-```typescript
-forward(): void
-```
-
-#### `router.go()`
-
-Navega n páginas no histórico.
-
-```typescript
-go(n: number): void
-```
-
-**Exemplo:**
-```typescript
-router.go(-2) // Volta 2 páginas
-router.go(1)  // Avança 1 página
-```
-
-#### `router.getCurrentRoute()`
-
-Retorna a rota atual.
-
-```typescript
-getCurrentRoute(): RouteInfo | null
-
-interface RouteInfo {
-  path: string
-  params: Record<string, string>
-  query: Record<string, string>
-  meta: Record<string, any>
-}
+await router.push('/users/7')      // navega e adiciona ao histórico
+await router.replace('/about')     // navega sem adicionar ao histórico
+router.back()
+router.forward()
+router.go(-2)                      // volta 2 páginas
+router.currentRoute()              // RouteMatch | null
 ```
 
 ---
@@ -701,56 +729,58 @@ interface RouteInfo {
 
 ### `ErrorBoundary`
 
-Componente para capturar erros em componentes filhos.
+Componente com `fallback` para erros. **Limitação importante:** o `html` avalia os filhos de forma eager, antes de chamar o componente. Um erro lançado ao *construir* os filhos (por exemplo `<${Quebrado} />` dentro do boundary) acontece antes do `ErrorBoundary` rodar e **não é capturado por ele**. Para proteger uma subárvore, use [`safeRender`](#saferender), que recebe uma função e chama o `fallback` se ela lançar.
 
 ```typescript
-function ErrorBoundary(props: ErrorBoundaryProps): VNode
+function ErrorBoundary(props: ErrorBoundaryProps): Child
 
-interface ErrorBoundaryProps {
-  fallback?: (error: Error) => VNode
-  onError?: (error: Error) => void
-  children: VNode | VNode[]
+type ErrorBoundaryProps = {
+  fallback: (error: Error) => Child // obrigatório
+  onError?: (error: Error, errorInfo: { componentStack?: string }) => void
+  children: Child
 }
 ```
 
-**Exemplo:**
+**Exemplo (proteja a subárvore com `safeRender`):**
 ```typescript
-import { ErrorBoundary, html } from '@_bashell/slash'
+import { html, safeRender } from '@_bashell/slash'
 
-const App = html`
-  ${ErrorBoundary({
-    fallback: (error) => html`
-      <div class="error">
-        <h2>Something went wrong</h2>
-        <p>${error.message}</p>
-      </div>
-    `,
-    onError: (error) => {
-      console.error('Error caught:', error)
-    },
-    children: html`<MyComponent />`
-  })}
-`
+function Quebrado(): never {
+  throw new Error('boom')
+}
+
+const view = safeRender(
+  () => html`<main><${Quebrado} /></main>`,
+  (error) => html`
+    <div class="error">
+      <h2>Something went wrong</h2>
+      <p>${error.message}</p>
+    </div>
+  `
+)
 ```
 
 ---
 
 ### `catchAsync()`
 
-Wrapper para funções assíncronas que captura erros.
+Envolve uma função assíncrona e devolve uma **tupla** `[safeFn, getError]`.
 
 ```typescript
 function catchAsync<T>(
   fn: () => Promise<T>,
   onError?: (error: Error) => void
-): Promise<T | null>
+): [() => Promise<T | null>, () => Error | null]
 ```
+
+- `safeFn()` executa `fn`; se lançar, guarda o erro, chama `onError` e resolve com `null`.
+- `getError()` devolve o último erro (ou `null`; é limpo no início de cada `safeFn()`).
 
 **Exemplo:**
 ```typescript
 import { catchAsync } from '@_bashell/slash'
 
-const data = await catchAsync(
+const [loadData, getError] = catchAsync(
   async () => {
     const res = await fetch('/api/data')
     return res.json()
@@ -759,30 +789,39 @@ const data = await catchAsync(
     console.error('Fetch failed:', error)
   }
 )
+
+const data = await loadData() // dados, ou null se falhou
+if (data === null) {
+  console.log('Erro:', getError()?.message)
+}
 ```
 
 ---
 
 ### `safeRender()`
 
-Renderiza um VNode com tratamento de erro.
+Executa uma função de view e, se ela lançar, registra o erro no console e devolve o `fallback`.
 
 ```typescript
 function safeRender(
-  vnode: VNode,
-  onError?: (error: Error) => VNode
-): string
+  view: () => Child,
+  fallback: (error: Error) => Child // obrigatório
+): Child
 ```
 
-**Uso (SSR):**
+**Exemplo:**
 ```typescript
-import { safeRender } from '@_bashell/slash'
+import { html, safeRender } from '@_bashell/slash'
 
-const html = safeRender(
-  App,
+const App = () => html`<h1>Hello</h1>`
+
+const view = safeRender(
+  () => App(),
   (error) => html`<h1>Error: ${error.message}</h1>`
 )
 ```
+
+No SSR, use `htmlString` (de `@_bashell/slash/ssr`) em vez de `html` na `view` e no `fallback`.
 
 ---
 
@@ -792,7 +831,7 @@ Configura um handler global de erros.
 
 ```typescript
 function setupGlobalErrorHandler(
-  handler: (error: Error) => void
+  onError: (error: Error, source: 'render' | 'runtime') => void
 ): void
 ```
 
@@ -810,21 +849,39 @@ setupGlobalErrorHandler((error) => {
 
 ## Formulários
 
-### Form Helpers
+### Helpers de formulário
 
+Importados de `@_bashell/slash` (ou de `@_bashell/slash/forms`). Não existe um tipo `FormHelpers<T>`: o Slash oferece funções pequenas que ligam inputs a um `State`.
+
+| Função | Para que serve |
+|--------|----------------|
+| `textFieldControl(state)` | Props `value`/`onInput` para `<input>` e `<textarea>`, ligados a `State<{ value: string }>` |
+| `checkboxControl(state)` | Props `checked`/`onChange` para checkbox, com `State<{ value: boolean }>` |
+| `radioControl(state, value)` | Props para um radio do grupo, com `State<{ value: string }>` |
+| `SelectControl(state)` | Props para `<select>`, com `State<{ value: string }>` |
+| `getText(e)`, `getChecked(e)`, `getSelectValue(e)` | Leem o valor de eventos tipados |
+| `onSubmit(cb)` | `preventDefault()` e entrega os dados do `<form>` como objeto |
+| `onReset(handler)`, `onButtonClick(handler)` | Handlers tipados |
+| `formToObject(form)` | Converte um `<form>` em objeto sem protótipo (`Object.create(null)`; campos repetidos viram arrays). Use `Object.hasOwn(obj, 'campo')` em vez de `obj.hasOwnProperty(...)` |
+| `delegate(root, type, selector, handler)` | Delegação de eventos; retorna função para remover o listener |
+
+**Exemplo:**
 ```typescript
-interface FormHelpers<T> {
-  values: State<T>
-  errors: State<Partial<Record<keyof T, string>>>
-  touched: State<Partial<Record<keyof T, boolean>>>
-  handleSubmit: (e: Event) => void
-  handleChange: (field: keyof T, value: any) => void
-  handleBlur: (field: keyof T) => void
-  reset: () => void
-}
+import { html, render, onSubmit } from '@_bashell/slash'
+
+const log = (data: Record<string, unknown>) => console.log(data)
+
+const Form = () => html`
+  <form onSubmit=${onSubmit(log)}>
+    <input name="email" type="email" />
+    <button type="submit">Enviar</button>
+  </form>
+`
+
+render(Form(), '#app')
 ```
 
-**Exemplo de uso está na seção de [Form Validation](/exemplos/form-validation/)**
+Veja os conceitos, o comportamento de foco e os exemplos completos em [Formulários](/formularios/conceitos/) e [Form Validation](/exemplos/form-validation/).
 
 ---
 
@@ -879,27 +936,13 @@ function isWarningsEnabled(): boolean
 
 ## Tipos TypeScript
 
-### `VNode`
-
-Representação virtual de um nó DOM.
-
-```typescript
-type VNode = ElementNode | TextNode | ComponentNode
-```
-
 ### `Props`
 
-Propriedades de um elemento.
+Propriedades de um elemento (`Record<string, unknown> | null`). Handlers de evento usam camelCase (`onClick`, `onInput`).
 
 ```typescript
-interface Props {
-  [key: string]: any
-  class?: string
-  style?: string | Record<string, string>
-  onclick?: EventHandler
-  onchange?: EventHandler
-  // ... outros event handlers
-}
+type Props = Record<string, unknown> | null
+type EventHandler = EventListenerOrEventListenerObject
 ```
 
 ### `State<T>`
@@ -907,10 +950,14 @@ interface Props {
 Tipo retornado por `createState()`.
 
 ```typescript
-interface State<T> {
-  get(): T
-  set(value: T): void
-  watch(callback: (newValue: T, oldValue: T) => void): () => void
+type State<T> = {
+  get: () => T
+  set: (value: T) => void
+  // O callback recebe só o novo valor; retorna a função de cancelamento
+  watch: (callback: (value: T) => void) => () => void
+  // Presentes quando o state foi criado com { enableHistory: true }
+  getHistory?: () => Readonly<StateHistory<T>>
+  clearHistory?: () => void
 }
 ```
 
@@ -920,13 +967,16 @@ Tipos válidos para children de elementos.
 
 ```typescript
 type Child =
-  | VNode
+  | Node
   | string
+  | SafeHtml
   | number
   | boolean
   | null
   | undefined
+  | Reactive<unknown> // { get(), subscribe(fn) }
   | Child[]
+  | readonly Child[]
 ```
 
 ---
@@ -935,4 +985,4 @@ type Child =
 
 - [Exemplos Práticos](/exemplos/todo-app/) - Aplicações completas
 - [Guias Avançados](/avancado/ssr/) - Técnicas avançadas
-- [Comparações](/referencia/comparacoes/) - Slash vs outras libs
+- [Slash vs React](/referencia/slash-vs-react/) - Comparação com outras libs

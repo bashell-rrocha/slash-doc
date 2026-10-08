@@ -10,56 +10,52 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 # Slash vs SolidJS
 
-Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosofia similar: **reatividade fine-grained sem Virtual DOM**. Apesar das semelhanças, há diferenças importantes em implementação e trade-offs.
+Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosofia similar: **sem Virtual DOM**, com modelos de reatividade diferentes. Apesar das semelhanças, há diferenças importantes em implementação e trade-offs.
 
 ## Resumo Rápido
 
 | Aspecto | Slash | SolidJS |
 |---------|-------|---------|
-| **Tamanho** | ~5KB | ~7KB |
-| **Reatividade** | Observer Pattern (manual) | Fine-grained Signals (auto) |
+| **Reatividade** | Observer Pattern (re-render por componente) | Fine-grained Signals (auto) |
 | **Virtual DOM** | ❌ Não | ❌ Não |
 | **Compiler** | ❌ Runtime-only | ✅ JSX compiler |
-| **Tracking** | Manual (`.get()`, `.watch()`) | Automático |
+| **Tracking** | Por componente (`.get()` no render; `.watch()` explícito) | Automático |
 | **SSR** | ✅ Nativo simples | ✅ Streaming avançado |
-| **Performance** | Excelente | Excelente |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Crescendo forte |
 
 <Aside type="note">
-**Similaridades:** Ambos eliminam Virtual DOM e fazem updates diretos no DOM. **Diferença chave:** SolidJS usa true fine-grained Signals com compiler auto-tracking, Slash usa Observer Pattern com tracking manual explícito via `.get()`, `.set()` e `.watch()`.
+**Similaridades:** Ambos eliminam Virtual DOM. **Diferença chave:** SolidJS usa true fine-grained Signals, onde componentes executam uma vez e só o ponto afetado atualiza. Slash usa Observer Pattern: um componente que lê `state.get()` re-executa quando o state muda e seus nós são substituídos (granularidade por componente).
 </Aside>
 
 ---
 
 ## Filosofia e Arquitetura
 
-### Filosofia Compartilhada: Fine-Grained Updates
+### Filosofia Compartilhada
 
 Slash e SolidJS compartilham filosofia similar:
 
 1. ✅ **Sem Virtual DOM** - Updates diretos no DOM
-2. ✅ **Reatividade granular** - Apenas o que mudou é atualizado
-3. ✅ **Fine-grained updates** - Updates cirúrgicos no DOM
-4. ✅ **Performance first** - Otimizados por design
+2. ✅ **Atualização direta do DOM** - sem diffing de árvore virtual
 
 **Diferença na implementação:**
-- **SolidJS**: True fine-grained Signals com auto-tracking
-- **Slash**: Observer Pattern com watchers/subscribers explícitos
+- **SolidJS**: True fine-grained Signals com auto-tracking (atualiza só o ponto afetado)
+- **Slash**: Observer Pattern com re-render por componente (atualiza o componente que leu o state)
 
 ### Diferença: True Signals vs Observer Pattern
 
 **SolidJS (True Signals):**
 - Fine-grained reactive primitives com auto-tracking
-- Usa JSX compiler para otimizar dependências
+- Rastreia dependências em runtime; o compiler JSX apenas transforma o template
 - Componentes executam uma única vez
 - `createSignal()`, `createEffect()`, `createMemo()` auto-detectam deps
 
 **Slash (Observer Pattern):**
 - Estado reativo tradicional com observers/watchers
 - 100% runtime, sem compiler
-- Componentes também executam uma vez
+- Componentes re-executam quando um state lido muda (monte-os como `<${Comp} />`)
 - `createState()` com `.get()`, `.set()`, `.watch()` explícitos
-- Sem auto-tracking, controle manual total
+- Tracking por componente: as chamadas a `get()` durante a execução do componente definem suas dependências; `.watch()` é o controle manual
 
 ---
 
@@ -95,16 +91,17 @@ function Counter() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Counter() {
-  const count = createState(0)
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
-  // Componente executa UMA vez
-  console.log('Component created')
+function Counter() {
+  // Componente re-executa quando count muda
+  console.log('Component rendered')
 
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -112,7 +109,7 @@ function Counter() {
 }
 ```
 
-**Observação:** Sintaxe muito similar! Ambos executam componente uma vez apenas.
+**Observação:** A sintaxe é parecida, mas o modelo de execução difere: no Solid o componente executa uma vez; no Slash ele re-executa quando um state que leu muda.
 
   </TabItem>
 
@@ -139,15 +136,16 @@ function Example() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+
+// Função pura, sem cache automático
+const doubled = () => {
+  console.log('Computing doubled')
+  return count.get() * 2
+}
+
+// Monte como <${Example} />: ler count.get() inscreve o componente
 function Example() {
-  const count = createState(0)
-
-  // Função pura, sem cache automático
-  const doubled = () => {
-    console.log('Computing doubled')
-    return count.get() * 2
-  }
-
   return html`<p>Doubled: ${doubled()}</p>`
 }
 ```
@@ -184,20 +182,20 @@ function Timer() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const seconds = createState(0)
+
+// Watcher explícito (criado uma vez, fora do componente)
+seconds.watch((newVal) => {
+  console.log('Seconds:', newVal)
+})
+
+// Slash não tem onCleanup público: você controla início e fim
+const interval = setInterval(() => {
+  seconds.set(seconds.get() + 1)
+}, 1000)
+// clearInterval(interval) quando não precisar mais
+
 function Timer() {
-  const seconds = createState(0)
-
-  // Watcher explícito
-  seconds.watch((newVal) => {
-    console.log('Seconds:', newVal)
-  })
-
-  const interval = setInterval(() => {
-    seconds.set(seconds.get() + 1)
-  }, 1000)
-
-  onCleanup(() => clearInterval(interval))
-
   return html`<p>${seconds.get()}</p>`
 }
 ```
@@ -232,12 +230,12 @@ function TodoList() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function TodoList() {
-  const todos = createState([
-    { id: 1, text: 'Learn Slash' },
-    { id: 2, text: 'Build app' }
-  ])
+const todos = createState([
+  { id: 1, text: 'Learn Slash' },
+  { id: 2, text: 'Build app' }
+])
 
+function TodoList() {
   return html`
     <ul>
       ${todos.get().map(todo => html`
@@ -257,33 +255,17 @@ function TodoList() {
 
 ## Performance
 
-### Benchmarks
+### Benchmarks e tamanho
 
-| Operação | Slash | SolidJS |
-|----------|-------|---------|
-| **First Render** | 8ms | 7ms |
-| **Update único** | 0.8ms | 0.6ms |
-| **Update 100 campos** | 12ms | 10ms |
-| **Lista 1000 items** | 115ms | 95ms |
-| **Insert/Remove** | 18ms | 15ms |
+Esta página não traz tabelas de benchmark nem comparação de tamanho com o SolidJS: não há medições reproduzíveis no repositório para sustentá-las. Meça no seu caso de uso.
 
-**Veredito:** Ambos extremamente rápidos. SolidJS ligeiramente mais rápido devido a otimizações do compiler.
-
-### Bundle Size
-
-```bash
-# Production, minified + gzip
-Slash: ~5KB
-SolidJS: ~7KB
-```
-
-**Diferença:** Slash é ~28% menor. Ambos muito leves comparados a React/Vue.
+Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **≈ 8,3 KB gzip**. O número depende do que seu app importa.
 
 ---
 
 ## Auto-tracking vs Manual Tracking
 
-### SolidJS: Auto-tracking (Compiler Magic)
+### SolidJS: Auto-tracking (em runtime)
 
 ```jsx
 import { createSignal, createEffect } from 'solid-js'
@@ -293,7 +275,7 @@ function Example() {
   const [name, setName] = createSignal('John')
 
   createEffect(() => {
-    // Compiler detecta que este effect depende de count
+    // O runtime detecta que este effect depende de count (leu count())
     console.log('Count changed:', count())
     // name() não é chamado, então não é dependência
   })
@@ -318,19 +300,20 @@ function Example() {
 ```typescript
 import { html, createState } from '@_bashell/slash'
 
+const count = createState(0)
+const name = createState('John')
+
+// Observer explícito (criado uma vez, fora do componente)
+count.watch((newCount) => {
+  console.log('Count changed:', newCount)
+})
+
+// Dependência implícita por componente: count.get() no render inscreve o componente
 function Example() {
-  const count = createState(0)
-  const name = createState('John')
-
-  // Explicitamente define dependência
-  count.watch((newCount) => {
-    console.log('Count changed:', newCount)
-  })
-
   return html`
     <div>
       <p>${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>+</button>
+      <button onClick=${() => count.set(count.get() + 1)}>+</button>
     </div>
   `
 }
@@ -339,12 +322,12 @@ function Example() {
 **Como funciona:**
 1. Sem compiler, tudo é runtime
 2. `.get()` lê valor, `.set()` atualiza
-3. `.watch()` registra callbacks explícitos
-4. Developer controla quando e como observar
+3. `.get()` durante a execução de um componente o inscreve no state; o componente re-executa quando o state muda
+4. `.watch()` registra callbacks explícitos fora do componente
 
 <Aside type="tip">
 **Auto-tracking (SolidJS):** Mais conveniente, menos boilerplate.
-**Manual tracking (Slash):** Mais explícito, mais previsível, sem magic.
+**Tracking por componente (Slash):** Mais explícito e previsível, mas a granularidade é o componente, não o ponto de uso.
 </Aside>
 
 ---
@@ -378,19 +361,20 @@ stream.pipe(response)
 
 ```typescript
 // server.ts
-import { renderToString, htmlString } from '@_bashell/slash'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App'
 
-const appHtml = renderToString(App())
+// renderToString devolve { html, state }
+const { html: appHtml, state } = renderToString(() => App())
 
-const fullHtml = htmlString`
-  <!DOCTYPE html>
-  <html>
-    <body>
-      <div id="app">${appHtml}</div>
-    </body>
-  </html>
-`
+// O documento é um template literal comum (htmlString com <!DOCTYPE> não funciona)
+const fullHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+  </body>
+</html>`
 
 response.send(fullHtml)
 ```
@@ -398,7 +382,7 @@ response.send(fullHtml)
 **Features:**
 - ✅ Renderização síncrona
 - ✅ Streaming básico
-- ✅ Hidratação simples
+- ✅ Hidratação simples (o cliente limpa o HTML do servidor e renderiza de novo)
 - 🔜 Features avançadas em desenvolvimento
 
 **Veredito:** SolidJS tem SSR mais maduro e avançado. Slash é mais simples mas funcional.
@@ -443,10 +427,10 @@ response.send(fullHtml)
 
 ### Quando Usar SolidJS
 
-1. **Performance Extrema é Crítica**
-   - Apps de alta frequência de updates
-   - Dashboards real-time
-   - Games/animações
+1. **Atualizações Granulares**
+   - Reatividade fine-grained (atualiza só o ponto afetado)
+   - Componentes que executam uma única vez
+   - Apps com muitos updates pequenos
 
 2. **Quer Auto-tracking**
    - Prefere conveniência do compiler
@@ -475,9 +459,9 @@ response.send(fullHtml)
    - Gosta de APIs explícitas
    - Quer entender tudo que acontece
 
-3. **Bundle Size Mínimo**
-   - Cada byte conta
-   - PWAs com budget apertado
+3. **Bundle Size Pequeno**
+   - Um app mínimo mede ≈ 8,3 KB gzip
+   - Poucas dependências
    - Embedded apps
 
 4. **Prototipagem Rápida**
@@ -499,8 +483,8 @@ response.send(fullHtml)
 | `<For>` | `.map()` | JS nativo |
 | `<Show>` | Ternário `? :` | JS nativo |
 | `<Switch>`/`<Match>` | `switch` | JS nativo |
-| `onMount()` | Código direto | Executa ao criar |
-| `onCleanup()` | `onCleanup()` | Idêntico |
+| `onMount()` | Código fora do componente | O corpo do componente re-executa; não há hook de montagem |
+| `onCleanup()` | Sem equivalente público | Gerencie timers/listeners você mesmo |
 
 ### Exemplo de Migração
 
@@ -535,19 +519,19 @@ function TodoApp() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+const todos = createState([])
+const filter = createState('all')
+
+const filteredTodos = () => {
+  const f = filter.get()
+  return todos.get().filter(t => {
+    if (f === 'active') return !t.done
+    if (f === 'done') return t.done
+    return true
+  })
+}
+
 function TodoApp() {
-  const todos = createState([])
-  const filter = createState('all')
-
-  const filteredTodos = () => {
-    const f = filter.get()
-    return todos.get().filter(t => {
-      if (f === 'active') return !t.done
-      if (f === 'done') return t.done
-      return true
-    })
-  }
-
   return html`
     <ul>
       ${filteredTodos().map(todo => html`
@@ -570,12 +554,10 @@ function TodoApp() {
 - ✅ JSX familiar
 - ✅ SSR avançado
 - ✅ Ecossistema crescendo forte
-- ✅ Performance top-tier
 
 **Contras:**
 - ❌ Necessita build step
-- ❌ Compiler "magic" (menos previsível)
-- ❌ Bundle ~40% maior que Slash
+- ❌ Rastreamento implícito (menos explícito)
 - ❌ Curva de aprendizado de reactivity
 
 ### Slash
@@ -583,10 +565,10 @@ function TodoApp() {
 **Prós:**
 - ✅ 100% runtime (sem build)
 - ✅ API explícita e previsível
-- ✅ Bundle mínimo (~5KB)
+- ✅ Bundle pequeno (veja a medição em Benchmarks e tamanho)
 - ✅ Zero config
 - ✅ TypeScript first-class
-- ✅ Extremamente simples
+- ✅ API pequena e simples
 
 **Contras:**
 - ❌ Tracking manual (mais verboso)
@@ -597,9 +579,9 @@ function TodoApp() {
 
 ---
 
-## Performance: Por que ambos são rápidos?
+## Atualização sem Virtual DOM
 
-Tanto Slash quanto SolidJS são extremamente rápidos pela mesma razão fundamental:
+Slash e SolidJS não usam Virtual DOM. Os caminhos de atualização são diferentes:
 
 ### Sem Virtual DOM Diff
 
@@ -608,13 +590,13 @@ React/Vue:
 State change → Re-render → VDOM diff → Patch DOM
               ↑___________|
 
-Slash/Solid:
-State change → Update DOM diretamente
+Solid: State change → Update DOM diretamente
+Slash: State change → Re-executa o componente → Substitui seus nós (sem diff)
 ```
 
-### Fine-Grained Reactivity
+### Fine-Grained Reactivity (Solid)
 
-Apenas o que mudou é atualizado:
+No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
 
 ```jsx
 // Se apenas count muda:
@@ -625,19 +607,13 @@ Apenas o que mudou é atualizado:
 </div>
 ```
 
-### Resultado
-
-- ⚡ Updates instantâneos
-- 💾 Uso mínimo de memória
-- 🎯 Sem trabalho desnecessário
-
 ---
 
 ## Conclusão
 
 ### Escolha SolidJS se:
 
-- Quer performance top absoluta
+- Quer reatividade fine-grained
 - Prefere auto-tracking (menos boilerplate)
 - Vem de React e gosta de JSX
 - Precisa SSR avançado
@@ -649,7 +625,7 @@ Apenas o que mudou é atualizado:
 - Valoriza simplicidade extrema
 - Prefere explicitness > magic
 - Não quer build step
-- Bundle size é crítico
+- Quer uma biblioteca pequena (app mínimo: ≈ 8,3 KB gzip)
 - Quer controle total
 - Aprecia APIs minimalistas
 
@@ -661,7 +637,7 @@ São tão similares em filosofia que você pode:
 - Usar Slash para libs pequenas
 - Usar Solid para apps principais
 
-Ambas são excelentes escolhas modernas para apps rápidas e eficientes!
+Ambas são escolhas modernas sem Virtual DOM; a escolha depende do modelo de reatividade e do ecossistema que você precisa.
 
 ---
 

@@ -14,7 +14,7 @@ Slash é uma biblioteca reativa moderna para construção de interfaces de usuá
 
 ### Por que Slash?
 
-Diferente de bibliotecas tradicionais como React ou Vue, Slash não utiliza Virtual DOM para gerenciar atualizações da interface. Em vez disso, usa um sistema de **estado reativo baseado em Observer Pattern** que atualiza apenas os elementos específicos do DOM que dependem do estado alterado.
+Diferente de bibliotecas tradicionais como React ou Vue, Slash não utiliza Virtual DOM para gerenciar atualizações da interface. Em vez disso, usa um sistema de **estado reativo baseado em Observer Pattern**: componentes que leem um state com `get()` re-renderizam quando ele muda, substituindo seus nós no DOM.
 
 **Vantagens:**
 - Zero overhead de diffing do VDOM
@@ -59,28 +59,32 @@ const element = h('div', { class: 'container' },
 O coração do Slash é seu sistema de estado reativo baseado em Observer Pattern:
 
 ```typescript
-import { createState, html } from '@_bashell/slash'
+import { createState, html, render } from '@_bashell/slash'
 
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
 const count = createState(0)
 
 const Counter = () => html`
   <div>
-    <p>Count: ${count}</p>
-    <button onclick=${() => count.set(count.get() + 1)}>
+    <p>Count: ${count.get()}</p>
+    <button onClick=${() => count.set(count.get() + 1)}>
       Increment
     </button>
   </div>
 `
+
+// Monte como <${Counter} />. render(Counter(), '#app') renderiza uma vez, sem reatividade
+render(html`<${Counter} />`, '#app')
 ```
 
-Quando `count.set()` é chamado, **apenas** os elementos DOM que dependem de `count` são atualizados - sem re-render completo do componente.
+Quando `count.set()` é chamado, os componentes que leram `count.get()` durante a renderização **re-renderizam**: seus nós anteriores são substituídos pelos novos. A granularidade é o componente, não o nó, e não há Virtual DOM nem diff. Passar o próprio state na interpolação (`${count}`) não é reativo: use `${count.get()}` dentro de um componente.
 
 **Arquitetura de Reatividade:** O Slash utiliza `createState()` que retorna objetos `State<T>` com métodos `get()`, `set()` e `watch()`. Esta abordagem combina:
-- **Auto-tracking**: Estados acessados durante renderização são rastreados automaticamente via `globalThis.__SLASH_TRACK_STATE__`
+- **Auto-tracking**: chamadas a `state.get()` feitas enquanto um componente executa registram o state como dependência dele, e o componente re-renderiza quando o state muda
 - **Imutabilidade**: Deep cloning garante que o estado nunca seja mutado acidentalmente
 - **FCIS Pattern**: Lógica pura em `state-core.ts`, side effects em `state.ts`
 - **Batching**: Múltiplas atualizações podem ser agrupadas com `batch()` para uma única notificação
-- **Duck typing**: Sistema detecta qualquer objeto com `get()` e `subscribe()` como reativo
+- **Duck typing**: objetos com `get()` e `subscribe()` (como o `Router`) são reativos como child ou prop. Um `State` tem `get()` e `watch()`, não `subscribe()`, e por isso não é reativo quando interpolado diretamente
 
 ## Quando usar Slash?
 
@@ -88,7 +92,7 @@ Quando `count.set()` é chamado, **apenas** os elementos DOM que dependem de `co
 
 - **SPAs (Single Page Applications)**: Roteamento integrado e gerenciamento de estado
 - **SSR Applications**: Suporte nativo para renderização server-side com hidratação
-- **Progressive Enhancement**: Hidratação de HTML estático gerado no servidor
+- **Progressive Enhancement**: HTML do servidor visível antes do JS; o cliente o substitui por uma renderização nova
 - **Aplicações com foco em performance**: Quando bundle size e velocidade são críticos
 - **Projetos TypeScript**: Type safety completo em toda a API
 
@@ -103,10 +107,9 @@ Quando `count.set()` é chamado, **apenas** os elementos DOM que dependem de `co
 | Característica | Slash | React | Vue | Solid |
 |----------------|-------|-------|-----|-------|
 | VDOM | ❌ | ✅ | ✅ | ❌ |
-| Reatividade | createState + Auto-tracking | Hooks/VDOM | Reactivity API | Fine-grained Signals |
+| Reatividade | createState + re-render por componente | Hooks/VDOM | Reactivity API | Fine-grained Signals |
 | SSR Nativo | ✅ | ✅ | ✅ | ✅ |
 | JSX sem build | ✅ (htm) | ❌ | ❌ | ❌ |
-| Bundle size | ~10KB | ~45KB | ~35KB | ~7KB |
 | TypeScript | ✅ | ✅ | ✅ | ✅ |
 | Imutabilidade | ✅ (deep clone) | ❌ | ❌ | ❌ |
 | FCIS Pattern | ✅ | ❌ | ❌ | ❌ |
@@ -212,3 +215,4 @@ Agora que você entende os conceitos fundamentais, explore:
 1. [Instalação e Setup](../02-installation/README.md) - Como começar a usar Slash
 2. [Renderização Básica](../03-rendering/README.md) - Aprenda a criar elementos e renderizar na página
 3. [Sistema de Estado](../04-state/README.md) - Mergulhe fundo no state management reativo
+4. [Segurança](/fundamentos/seguranca/) - O Slash é seguro por padrão: entenda o que é escapado e bloqueado

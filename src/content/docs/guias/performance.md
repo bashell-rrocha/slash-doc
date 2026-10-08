@@ -39,13 +39,9 @@ const loadUser = async (id: number) => {
 }
 ```
 
-### Performance Gain
+### Efeito do batch
 
-| Operação | Sem Batch | Com Batch | Ganho |
-|----------|-----------|-----------|-------|
-| 100 updates | 100ms | 1ms | **100x** |
-| 1000 updates | 1000ms | 1ms | **1000x** |
-| 10 states, 10 updates cada | 100ms | 10ms | **10x** |
+Sem `batch`, cada `set()` notifica os watchers na hora. Com `batch`, cada estado alterado notifica **uma única vez**, com o valor final, no fim do batch mais externo. O ganho depende do custo dos seus watchers e dos componentes que leem o state: meça no seu caso.
 
 **Documentação completa:** [Batch Updates](/fundamentos/batch/)
 
@@ -58,24 +54,18 @@ Sempre remova watchers quando não precisar mais deles:
 ```typescript
 import { createState } from '@_bashell/slash'
 
-const Component = () => {
-  const state = createState(0)
+const state = createState(0)
 
-  // ❌ Memory leak: watcher nunca é removido
-  state.watch(() => {
-    console.log('State changed')
-  })
+// ❌ Memory leak: se isto estiver no corpo de um componente, cada render cria um watcher novo
+// const Component = () => { state.watch(() => console.log('State changed')); ... }
 
-  // ✅ Correto: guarde e remova o watcher
-  const unwatch = state.watch(() => {
-    console.log('State changed')
-  })
+// ✅ Correto: crie o watcher uma vez, fora do componente, e guarde o unwatch
+const unwatch = state.watch(() => {
+  console.log('State changed')
+})
 
-  // Cleanup quando componente for destruído
-  return () => {
-    unwatch()
-  }
-}
+// Quando não precisar mais:
+unwatch()
 ```
 
 ### Event Listeners
@@ -471,26 +461,28 @@ const loadData = async (userId: number) => {
 Use `renderToStream()` em vez de `renderToString()` para melhor TTFB:
 
 ```typescript
-import { renderToStream } from '@_bashell/slash'
+import { renderToString, renderToStream } from '@_bashell/slash/ssr'
 
-// ❌ Espera renderização completa
-const html = renderToString(App())
+// ❌ Espera renderização completa (devolve { html, state })
+const { html } = renderToString(App)
 response.send(html)
 
-// ✅ Stream chunks progressivamente
-const stream = renderToStream(App())
-stream.pipeTo(response.writable)
+// ✅ Chunks progressivos: renderToStream é um async generator de strings
+for await (const chunk of renderToStream(App)) {
+  response.write(chunk)
+}
+response.end()
 ```
 
-### Hydration Optimization
+### Primeira renderização no cliente
 
-Minimize JavaScript executado na hydration:
+O cliente renderiza a view de novo por cima do HTML do servidor (veja [Hydration](/avancado/hydration/)); minimize o trabalho dessa primeira execução:
 
 ```typescript
 import { html, isServer } from '@_bashell/slash'
 
 const App = () => {
-  // ❌ Executa lógica pesada em hydration
+  // ❌ Executa lógica pesada na primeira renderização
   const data = isServer() ? serverData : expensiveClientComputation()
 
   // ✅ Use dados pré-computados do servidor
@@ -597,22 +589,9 @@ window.addEventListener('load', () => {
 - Requests sequenciais desnecessários
 - Lógica pesada em renders
 
-## Benchmarks
+## Medições
 
-Comparação de performance com outras bibliotecas:
-
-| Métrica | Slash | React | Vue | Solid |
-|---------|-------|-------|-----|-------|
-| Bundle size (min+gzip) | 10KB | 45KB | 33KB | 7KB |
-| Initial render (1000 items) | 15ms | 45ms | 30ms | 12ms |
-| Update (1000 items) | 8ms | 25ms | 18ms | 7ms |
-| Memory (1000 components) | 2MB | 8MB | 5MB | 2.5MB |
-
-**Slash se destaca em:**
-- ✅ Bundle size pequeno
-- ✅ Performance de updates
-- ✅ Baixo uso de memória
-- ✅ Sem Virtual DOM overhead
+Não há benchmarks comparativos com outras bibliotecas no repositório, então esta página não traz tabelas deles. O que existe é a medição de tamanho: `bun test scripts/bundle-size.test.ts` no pacote core. Para um app mínimo (`createState` + `html` + `render`, minificado), a versão atual mediu **≈ 8,3 KB gzip**. Use o profiling do navegador para medir o seu caso.
 
 ## Próximos Passos
 
