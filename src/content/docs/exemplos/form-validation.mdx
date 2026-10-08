@@ -453,10 +453,14 @@ export class FormValidator<T extends Record<string, any>> {
 
 ## Componente SignupForm
 
-Formulário completo de cadastro:
+Formulário completo de cadastro. Três decisões seguem a reatividade do Slash (um componente re-executa quando um state que ele leu muda):
+
+- o `validator` é criado **uma vez**, fora dos componentes;
+- os `<input>` não leem nenhum state (são não controlados), para não serem recriados a cada tecla;
+- só `FieldMessage` e `SubmitButton` leem o state do validador e re-renderizam.
 
 ```typescript title="src/components/SignupForm.ts"
-import { html, type VNode } from '@_bashell/slash'
+import { html } from '@_bashell/slash'
 import { FormValidator } from '../validation/form-validator'
 import {
   required,
@@ -471,194 +475,201 @@ import {
 import { uniqueUsername, uniqueEmail } from '../validation/async'
 import type { SignupData } from '../types'
 
-export const SignupForm = (): VNode => {
-  // Cria validador
-  const validator = new FormValidator<SignupData>({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    age: 18,
-    terms: false
-  })
+const initialValues: SignupData = {
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  age: 18,
+  terms: false
+}
 
-  // Define regras de validação
-  validator.addRules('username', [
-    required('Username is required'),
-    minLength(3),
-    maxLength(20),
-    uniqueUsername()
-  ])
+// Cria validador (uma vez, fora do componente)
+const validator = new FormValidator<SignupData>(initialValues)
 
-  validator.addRules('email', [
-    required('Email is required'),
-    email(),
-    uniqueEmail()
-  ])
+// Define regras de validação
+validator.addRules('username', [
+  required('Username is required'),
+  minLength(3),
+  maxLength(20),
+  uniqueUsername()
+])
 
-  validator.addRules('password', [
-    required('Password is required'),
-    strongPassword()
-  ])
+validator.addRules('email', [
+  required('Email is required'),
+  email(),
+  uniqueEmail()
+])
 
-  validator.addRules('confirmPassword', [
-    required('Please confirm your password'),
-    matches('password', 'Password')
-  ])
+validator.addRules('password', [
+  required('Password is required'),
+  strongPassword()
+])
 
-  validator.addRules('age', [
-    required('Age is required'),
-    min(18),
-    max(120)
-  ])
+validator.addRules('confirmPassword', [
+  required('Please confirm your password'),
+  matches('password', 'Password')
+])
 
-  validator.addRules('terms', [
-    required('You must accept the terms')
-  ])
+validator.addRules('age', [
+  required('Age is required'),
+  min(18),
+  max(120)
+])
 
-  // Re-render quando estado mudar
-  let container: HTMLElement | null = null
-  validator.watch(() => {
-    if (container) {
-      const newVNode = SignupForm()
-      container.replaceWith(newVNode as any)
-    }
-  })
+validator.addRules('terms', [
+  required('You must accept the terms')
+])
 
-  const handleBlur = async (field: keyof SignupData) => {
-    validator.setTouched(field)
-    await validator.validateField(field)
+const handleBlur = async (field: keyof SignupData) => {
+  validator.setTouched(field)
+  await validator.validateField(field)
+}
+
+const handleChange = (field: keyof SignupData, value: any) => {
+  validator.setValue(field, value)
+
+  // Valida em tempo real apenas se já tocou o campo
+  if (validator.getFieldState(field).touched) {
+    // Debounce para validações assíncronas
+    setTimeout(() => validator.validateField(field), 300)
+  }
+}
+
+const handleSubmit = async (e: Event) => {
+  e.preventDefault()
+  const form = e.target as HTMLFormElement
+
+  // Marca todos como touched
+  const fields = ['username', 'email', 'password', 'confirmPassword', 'age', 'terms'] as const
+  fields.forEach(field => validator.setTouched(field))
+
+  validator.setSubmitting(true)
+
+  // Valida tudo
+  const isValid = await validator.validateAll()
+
+  if (isValid) {
+    console.log('Form submitted:', validator.getValues())
+
+    // Simula envio
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    alert('Account created successfully!')
+    validator.reset(initialValues)
+    form.reset() // os inputs são não controlados: limpe o DOM também
   }
 
-  const handleChange = (field: keyof SignupData, value: any) => {
-    validator.setValue(field, value)
+  validator.setSubmitting(false)
+}
 
-    // Valida em tempo real apenas se já tocou o campo
-    const fieldState = validator.getFieldState(field)
-    if (fieldState.touched) {
-      // Debounce para validações assíncronas
-      setTimeout(() => validator.validateField(field), 300)
-    }
-  }
-
-  const handleSubmit = async (e: Event) => {
-    e.preventDefault()
-
-    // Marca todos como touched
-    const fields = ['username', 'email', 'password', 'confirmPassword', 'age', 'terms'] as const
-    fields.forEach(field => validator.setTouched(field))
-
-    validator.setSubmitting(true)
-
-    // Valida tudo
-    const isValid = await validator.validateAll()
-
-    if (isValid) {
-      const values = validator.getValues()
-      console.log('Form submitted:', values)
-
-      // Simula envio
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      alert('Account created successfully!')
-      validator.reset()
-    }
-
-    validator.setSubmitting(false)
-  }
-
-  const renderField = (
-    field: keyof SignupData,
-    label: string,
-    type: string = 'text'
-  ) => {
-    const fieldState = validator.getFieldState(field)
-    const hasError = fieldState.touched && fieldState.error
-    const isValidating = fieldState.validating
-
-    return html`
-      <div class="form-group">
-        <label for=${field}>${label}</label>
-        <div class="input-wrapper">
-          <input
-            id=${field}
-            type=${type}
-            value=${fieldState.value}
-            oninput=${(e: Event) => {
-              const target = e.target as HTMLInputElement
-              handleChange(field, type === 'number' ? parseInt(target.value) : target.value)
-            }}
-            onblur=${() => handleBlur(field)}
-            class=${hasError ? 'error' : ''}
-            aria-invalid=${hasError ? 'true' : 'false'}
-            aria-describedby=${hasError ? `${field}-error` : undefined}
-          />
-          ${isValidating ? html`
-            <span class="spinner"></span>
-          ` : null}
-        </div>
-        ${hasError ? html`
-          <span id="${field}-error" class="error-message" role="alert">
-            ${fieldState.error}
-          </span>
-        ` : null}
-      </div>
-    `
-  }
-
-  const state = validator.getState()
+// Lê o state do validador: re-renderiza só a mensagem de erro e o spinner
+const FieldMessage = ({ field }: { field: keyof SignupData }) => {
+  const fieldState = validator.getFieldState(field)
+  const hasError = fieldState.touched && fieldState.error
 
   return html`
-    <div class="signup-form" ref=${(el: HTMLElement) => { container = el }}>
-      <h1>Create Account</h1>
-
-      <form onsubmit=${handleSubmit} novalidate>
-        ${renderField('username', 'Username')}
-        ${renderField('email', 'Email', 'email')}
-        ${renderField('password', 'Password', 'password')}
-        ${renderField('confirmPassword', 'Confirm Password', 'password')}
-        ${renderField('age', 'Age', 'number')}
-
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              checked=${validator.getFieldState('terms').value}
-              onchange=${(e: Event) => {
-                const target = e.target as HTMLInputElement
-                handleChange('terms', target.checked)
-                handleBlur('terms')
-              }}
-            />
-            I accept the terms and conditions
-          </label>
-          ${validator.getFieldState('terms').touched && validator.getFieldState('terms').error ? html`
-            <span class="error-message" role="alert">
-              ${validator.getFieldState('terms').error}
-            </span>
-          ` : null}
-        </div>
-
-        <button
-          type="submit"
-          class="btn btn-primary btn-block"
-          disabled=${state.isSubmitting}
-        >
-          ${state.isSubmitting ? 'Creating Account...' : 'Create Account'}
-        </button>
-      </form>
-
-      <div class="form-footer">
-        Already have an account? <a href="/login">Login</a>
-      </div>
-    </div>
+    <span>
+      ${fieldState.validating ? html`<span class="spinner"></span>` : null}
+      ${hasError ? html`
+        <span id=${`${field}-error`} class="error-message" role="alert">
+          ${fieldState.error}
+        </span>
+      ` : null}
+    </span>
   `
 }
+
+// Não lê states: o <input> nunca é recriado enquanto o usuário digita
+const Field = ({ field, label, type = 'text' }: {
+  field: keyof SignupData
+  label: string
+  type?: string
+}) => html`
+  <div class="form-group">
+    <label for=${field}>${label}</label>
+    <div class="input-wrapper">
+      <input
+        id=${field}
+        type=${type}
+        value=${String(initialValues[field])}
+        onInput=${(e: Event) => {
+          const target = e.target as HTMLInputElement
+          handleChange(field, type === 'number' ? parseInt(target.value) : target.value)
+        }}
+        onBlur=${() => handleBlur(field)}
+      />
+    </div>
+    <${FieldMessage} field=${field} />
+  </div>
+`
+
+const SubmitButton = () => {
+  const { isSubmitting } = validator.getState()
+
+  return html`
+    <button
+      type="submit"
+      class="btn btn-primary btn-block"
+      disabled=${isSubmitting}
+    >
+      ${isSubmitting ? 'Creating Account...' : 'Create Account'}
+    </button>
+  `
+}
+
+export const SignupForm = () => html`
+  <div class="signup-form">
+    <h1>Create Account</h1>
+
+    <form onSubmit=${handleSubmit} novalidate>
+      <${Field} field="username" label="Username" />
+      <${Field} field="email" label="Email" type="email" />
+      <${Field} field="password" label="Password" type="password" />
+      <${Field} field="confirmPassword" label="Confirm Password" type="password" />
+      <${Field} field="age" label="Age" type="number" />
+
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            onChange=${(e: Event) => {
+              handleChange('terms', (e.target as HTMLInputElement).checked)
+              handleBlur('terms')
+            }}
+          />
+          I accept the terms and conditions
+        </label>
+        <${FieldMessage} field="terms" />
+      </div>
+
+      <${SubmitButton} />
+    </form>
+
+    <div class="form-footer">
+      Already have an account? <a href="/login">Login</a>
+    </div>
+  </div>
+`
 ```
 
 <Aside type="tip">
 Use `novalidate` no form para desabilitar validação nativa do HTML5 e ter controle total sobre mensagens e UX.
 </Aside>
+
+## Entry Point
+
+```typescript title="src/index.ts"
+import { html, render } from '@_bashell/slash'
+import { SignupForm } from './components/SignupForm'
+import './styles.css'
+
+const root = document.getElementById('app')
+if (root) {
+  // Monte como <${SignupForm} />
+  render(html`<${SignupForm} />`, root)
+}
+```
 
 ## Estilos CSS
 
@@ -735,19 +746,6 @@ Use `novalidate` no form para desabilitar validação nativa do HTML5 e ter cont
 .checkbox-label input[type="checkbox"] {
   width: auto;
   margin-right: 0.5rem;
-}
-```
-
-## Entry Point
-
-```typescript title="src/index.ts"
-import { render } from '@_bashell/slash'
-import { SignupForm } from './components/SignupForm'
-import './styles.css'
-
-const root = document.getElementById('app')
-if (root) {
-  render(SignupForm(), root)
 }
 ```
 
