@@ -25,7 +25,7 @@ Este exemplo demonstra padrões avançados de carregamento de dados usando Slash
 - ✅ Dependent queries
 
 <Aside type="note">
-Em todos os exemplos o state fica **fora** dos componentes e é lido com `state.get()` no topo de cada componente, montado como `<${Comp} />`. Um componente re-executa quando um state que ele leu muda; um `createState()` dentro dele seria recriado a cada render, e disparar um fetch no corpo repetiria a requisição.
+Em todos os exemplos o state fica **fora** dos componentes e é lido com `state.get()` dentro de cada componente, montado como `<${Comp} />`. Um componente re-executa quando um state que ele leu muda; um `createState()` dentro dele seria recriado a cada render, e disparar um fetch no corpo repetiria a requisição.
 </Aside>
 
 ## Estrutura do Projeto
@@ -375,7 +375,7 @@ export const loadProfile = async (userId: string) => {
 }
 
 export const UserProfile = () => {
-  // Leia todos os states no topo
+  // Estes get() inscrevem o componente
   const u = user.state.get()
   const p = posts.state.get()
 
@@ -415,7 +415,7 @@ export const loadDashboard = () =>
   Promise.all([posts.load(), users.load(), comments.load()])
 
 export const Dashboard = () => {
-  // Leia os três no topo: o Dashboard re-renderiza quando qualquer um mudar
+  // Os três get() inscrevem o Dashboard: ele re-renderiza quando qualquer um mudar
   const p = posts.state.get()
   const u = users.state.get()
   const c = comments.state.get()

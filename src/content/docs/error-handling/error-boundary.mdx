@@ -202,7 +202,7 @@ const loadUser = async () => {
 }
 
 function UserProfile() {
-  // Leia todos os states no topo: getError() e userData.get() inscrevem o componente
+  // getError() e userData.get() inscrevem o componente
   const error = getError()
   const user = userData.get()
 
@@ -263,7 +263,7 @@ const loadAll = () =>
   )
 
 function DataDashboard() {
-  // Leia tudo no topo para inscrever o componente
+  // Estas leituras inscrevem o componente
   const error1 = getError1()
   const error2 = getError2()
   const error3 = getError3()

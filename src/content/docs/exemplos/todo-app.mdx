@@ -252,7 +252,7 @@ import { todoState, setFilter, clearCompleted, getActiveCount, getCompletedCount
 import type { Filter } from '../types'
 
 export const TodoFilters = () => {
-  // Leia os states no topo: o componente re-renderiza quando o state muda
+  // Estes get() inscrevem o componente: ele re-renderiza quando o state muda
   const state = todoState.get()
   const activeCount = getActiveCount()
   const completedCount = getCompletedCount()

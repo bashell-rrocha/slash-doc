@@ -134,7 +134,7 @@ export function Counter(props: { start: number }) {
 }
 ```
 
-Sem o wrapper, o slash reexecuta o corpo do componente a cada mudança de estado e o estado volta ao valor inicial. No build, `reactiveView` apenas chama a função uma vez.
+No navegador, `reactiveView` monta a função como componente reativo (`h(fn, null)`): ele re-executa quando um state lido dentro dela muda, e o `createState` do corpo da ilha, criado uma vez, continua no closure. Sem o wrapper, `mountIslands` chamaria o componente uma única vez, sem rastreamento, e a ilha não reagiria ao estado. No build, `reactiveView` apenas chama a função uma vez.
 
 ## Imagens
 
@@ -223,7 +223,7 @@ A porta padrão é 4000; mude com `PORT=4100 bun run dev` (vale também para `pr
 ## Criar um projeto derivado
 
 1. Copie a pasta do template sem `.git/`, `docs/`, `node_modules/`, `dist/` e `.slash-cache/`.
-2. No `package.json`, troque `@_bashell/slash` de `workspace:*` para a versão do npm: `"@_bashell/slash": "^0.0.1"`.
+2. No `package.json`, troque `@_bashell/slash` de `workspace:*` para a versão do npm: `"@_bashell/slash": "^0.0.2"`.
 3. Remova o alias `paths` (que aponta para `../slash/src`) do `tsconfig.json`.
 4. Ajuste `src/site.ts` e `src/routes.ts` e rode `bun install && bun run dev`.
 5. Para os testes E2E, instale o navegador do Playwright uma vez: `bunx playwright install chromium`.

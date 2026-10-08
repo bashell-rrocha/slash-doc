@@ -217,7 +217,7 @@ import { router } from '../router'
 import { authState, logout } from '../services/auth'
 
 export const Header = () => {
-  // Leia os states no topo
+  // Estes get() inscrevem o componente
   const auth = authState.get()
   const currentPath = router.get().currentRoute?.path ?? '/'
 
