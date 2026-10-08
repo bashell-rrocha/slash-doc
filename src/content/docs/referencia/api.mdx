@@ -471,12 +471,20 @@ Aplica a política de URLs do Slash a um valor e devolve o próprio valor ou `BL
 ```typescript
 import { sanitizeUrl, BLOCKED_URL } from '@_bashell/slash/core'
 
-const destino = sanitizeUrl('href', req.query.next ?? '/')
-if (destino === BLOCKED_URL) return res.redirect('/')
-res.redirect(destino)
+const base = new URL('https://app.example.com')
+
+function destinoSeguro(next: string): string {
+  if (sanitizeUrl('href', next) === BLOCKED_URL) return '/'
+  try {
+    const url = new URL(next, base)
+    return url.origin === base.origin ? url.pathname + url.search + url.hash : '/'
+  } catch {
+    return '/'
+  }
+}
 ```
 
-A política é de **esquema**: ela não restringe o host. `https://qualquer.com` passa.
+`sanitizeUrl` valida o **esquema**, não o destino: `//evil.com` e `https://evil.com` passam. Para um redirect, confira também a origem, como acima.
 
 ---
 

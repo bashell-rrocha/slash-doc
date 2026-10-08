@@ -591,7 +591,7 @@ window.addEventListener('load', () => {
 
 ## Medições
 
-Não há benchmarks comparativos com outras bibliotecas no repositório, então esta página não traz tabelas deles. O que existe é a medição de tamanho: `bun test scripts/bundle-size.test.ts` no pacote core. Para um app mínimo (`createState` + `html` + `render`, minificado), a versão atual mediu **8,39 KB gzip** (7,45 KB brotli). Use o profiling do navegador para medir o seu caso.
+Não há benchmarks comparativos com outras bibliotecas no repositório, então esta página não traz tabelas deles. O que existe é a medição de tamanho: `bun test scripts/bundle-size.test.ts` no pacote core. Para um app mínimo (`createState` + `html` + `render`, minificado), a versão atual mediu **≈ 8,3 KB gzip**. Use o profiling do navegador para medir o seu caso.
 
 ## Próximos Passos
 

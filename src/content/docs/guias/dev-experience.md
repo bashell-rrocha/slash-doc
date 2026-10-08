@@ -46,10 +46,10 @@ Em dev mode, Slash emite warnings úteis no console quando detecta problemas:
 ```typescript
 import { html } from '@_bashell/slash'
 
-// ⚠️ onclick só aceita função, objeto handleEvent ou tupla [fn, opções]; ...
+// ⚠️ onclick only accepts a function, a handleEvent object or a [fn, options] tuple; ...
 html`<button onclick="alert(1)">Click</button>`
 
-// ⚠️ URL bloqueada em href: "javascript:alert(1)". Para URL confiável use unsafeUrl()
+// ⚠️ Blocked URL in href: "javascript:alert(1)". For a trusted URL use unsafeUrl()
 html`<a href=${'javascript:alert(1)'}>Open</a>`
 
 // ✅ Correto
@@ -417,7 +417,7 @@ bun run build
 
 ### Bundle Size
 
-O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **8,39 KB gzip** e 7,45 KB brotli. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
+O repositório mede o tamanho de um app mínimo (`createState` + `html` + `render`, minificado) com `bun test scripts/bundle-size.test.ts` no pacote core. Resultado medido na versão atual: **≈ 8,3 KB gzip**. O tamanho real do seu build depende do que você importa (router, forms, SSR) e não foi medido por parte aqui. Não há medições de outras bibliotecas no repositório.
 
 ## Configuração Recomendada
 

@@ -130,14 +130,24 @@ A URL do `content` de `<meta http-equiv="refresh" content="5;url=...">` segue a 
 
 ### Validando entrada com `sanitizeUrl`
 
-`sanitizeUrl` e `BLOCKED_URL` expõem a mesma política para URLs que não passam por um atributo do Slash (um redirect no servidor, por exemplo):
+`sanitizeUrl` e `BLOCKED_URL` expõem a mesma política para URLs que não passam por um atributo do Slash (um redirect no servidor, por exemplo). **`sanitizeUrl` valida o esquema, não o destino:** `//evil.com` e `https://evil.com` passam. Num redirect, confira também a origem:
 
 ```typescript
 import { sanitizeUrl, BLOCKED_URL } from '@_bashell/slash/core'
 
-const destino = sanitizeUrl('href', req.query.next ?? '/')
-if (destino === BLOCKED_URL) return res.redirect('/')
-res.redirect(destino)
+const base = new URL('https://app.example.com')
+
+function destinoSeguro(next: string): string {
+  if (sanitizeUrl('href', next) === BLOCKED_URL) return '/'
+  try {
+    const url = new URL(next, base)
+    return url.origin === base.origin ? url.pathname + url.search + url.hash : '/'
+  } catch {
+    return '/'
+  }
+}
+
+res.redirect(destinoSeguro(req.query.next ?? '/'))
 ```
 
 ## Links do roteador

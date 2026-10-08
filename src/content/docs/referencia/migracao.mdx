@@ -58,7 +58,6 @@ A 0.0.3 torna o core **seguro por padrão**. Uma string é sempre texto, URLs e 
 | --- | --- | --- |
 | usa ``htmlString`...` `` como `string` (`.length`, `+`, `.startsWith`, `res.send(x)`) | ele devolve um `SafeHtml` | use `String(x)` ou `renderToString(() => x).html` |
 | devolve HTML montado à mão de um componente ou helper (`return "<div>...</div>"`, Markdown, ícones) | a string aparece como texto visível | devolva um template `htmlString`/`html`; para marcação confiável use `unsafeHtml(str)` |
-| usa o helper `text()` ou o espaço inicial para escapar strings que começam com `<` | não é mais necessário, toda string já é escapada | apague o helper e interpole direto |
 | passa `innerHTML=${...}`, `outerHTML=...` ou `srcdoc=${...}` como prop | a prop é ignorada (aviso em dev) | use `unsafeHtml(...)` como filho; `srcdoc=${unsafeHtml(...)}` |
 | usa `javascript:`, `data:text/html`, `file:`, `whatsapp:`, `ftp:` ou outros esquemas próprios em `href`/`src`/`action` (passam `http`, `https`, `mailto`, `tel`, `sms`; `blob:` em `src` de mídia; `data:image/svg+xml` em `img` e `url()` de CSS) | o valor vira `about:blank#blocked` | use uma URL real, ou `unsafeUrl(url)` para uma URL confiável; valide entradas com `sanitizeUrl` |
 | usa `<${Link} to="./x">`, `to="../x"`, `to="about"` ou uma URL absoluta | não navega, `href` bloqueado | use um caminho do app (`/x`, `?q`, `#h`); para site externo, adicione `external` |
