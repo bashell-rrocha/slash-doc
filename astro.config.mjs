@@ -33,6 +33,7 @@ export default defineConfig({
 						{ label: 'Renderização Básica', slug: 'fundamentos/renderizacao' },
 						{ label: 'Sistema de Estado', slug: 'fundamentos/estado' },
 						{ label: 'Batch Updates', slug: 'fundamentos/batch' },
+						{ label: 'Segurança', slug: 'fundamentos/seguranca' },
 					],
 				},
 				{

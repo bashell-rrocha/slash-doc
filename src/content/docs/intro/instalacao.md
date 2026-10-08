@@ -385,6 +385,10 @@ Saída esperada:
 ✅ Hyperscript working: [object HTMLDivElement]
 ```
 
+## Segurança
+
+O Slash é seguro por padrão: toda string é escapada, URLs perigosas e handlers que não são função são bloqueados. Leia a página [Segurança](/fundamentos/seguranca/) antes de colocar dado de usuário numa página, e use sempre `serializeStateForScript` para embutir estado em `<script>`.
+
 ## Troubleshooting
 
 ### Erro: Cannot find module '@_bashell/slash'

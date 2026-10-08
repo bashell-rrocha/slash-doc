@@ -215,3 +215,4 @@ Agora que você entende os conceitos fundamentais, explore:
 1. [Instalação e Setup](../02-installation/README.md) - Como começar a usar Slash
 2. [Renderização Básica](../03-rendering/README.md) - Aprenda a criar elementos e renderizar na página
 3. [Sistema de Estado](../04-state/README.md) - Mergulhe fundo no state management reativo
+4. [Segurança](/fundamentos/seguranca/) - O Slash é seguro por padrão: entenda o que é escapado e bloqueado
