@@ -118,14 +118,17 @@ const App = () => htmlString`<div>Funciona no servidor</div>`
 
 ### Escapando HTML
 
-O `htmlString` escapa valores de texto interpolados para prevenir XSS:
+O `htmlString` escapa valores de texto interpolados, **desde que o texto não comece com `<`** (nesse caso é tratado como HTML pronto, veja a regra de confiança abaixo). Para dado de usuário que possa começar com `<`, prefixe um espaço antes de interpolar (o helper `text()` do exemplo abaixo faz isso):
 
 ```typescript
+// Espaço inicial se o texto começar com `<`: o htmlString passa a escapá-lo
+const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
+
 const userInput = "João <script>alert()</script>"
 
 const App = () => htmlString`
   <div>
-    <p>${userInput}</p>
+    <p>${text(userInput)}</p>
   </div>
 `
 

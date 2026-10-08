@@ -375,7 +375,7 @@ response.end()
 
 ### `htmlString`
 
-Template tag que renderiza para uma string HTML no servidor. Valores de texto interpolados são escapados.
+Template tag que renderiza para uma string HTML no servidor. Valores de texto interpolados são escapados, exceto strings que começam com `<`, tratadas como HTML pronto (veja a regra de confiança em SSR).
 
 ```typescript
 const htmlString: (strings: TemplateStringsArray, ...values: unknown[]) => string

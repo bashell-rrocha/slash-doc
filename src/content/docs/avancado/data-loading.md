@@ -370,6 +370,10 @@ const userLoader = createLoader(
   { key: 'user', ttl: 60000 }
 )
 
+// No SSR, uma string que começa com `<` sai como HTML pronto, sem escape.
+// O espaço inicial faz o htmlString escapar o valor normalmente.
+const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
+
 // Renderizar página
 async function renderPage(userId: string) {
   // Buscar dados no servidor
@@ -381,8 +385,8 @@ async function renderPage(userId: string) {
   // Renderizar componente
   const App = () => htmlString`
     <div id="app">
-      <h1>${user.name}</h1>
-      <p>Email: ${user.email}</p>
+      <h1>${text(user.name)}</h1>
+      <p>Email: ${text(user.email)}</p>
     </div>
   `
 
@@ -594,7 +598,8 @@ import {
 
 type Post = { id: string; title: string; content: string }
 
-// Escapa texto vindo de usuário antes de colocá-lo em HTML montado à mão
+// Para HTML montado à mão (template literal comum): escapa de verdade.
+// NÃO use dentro de htmlString (o valor seria escapado duas vezes)
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -602,6 +607,10 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+
+// No SSR, uma string que começa com `<` sai como HTML pronto, sem escape.
+// O espaço inicial faz o htmlString escapar o valor normalmente.
+const text = (value: string): string => (value.startsWith('<') ? ` ${value}` : value)
 
 const postsLoader = createLoader(
   async () => {
@@ -629,7 +638,7 @@ async function renderBlogPage(postId: string) {
   // Renderizar
   const App = () => htmlString`
     <article>
-      <h1>${post.title}</h1>
+      <h1>${text(post.title)}</h1>
       <div>${post.content /* HTML já sanitizado: ver aviso abaixo */}</div>
     </article>
   `
@@ -657,7 +666,7 @@ async function renderBlogPage(postId: string) {
 ```
 
 :::caution[Texto de usuário no SSR]
-No SSR, uma string que começa com `<` é tratada como HTML pronto e sai sem escape. Por isso `post.content` só pode ser interpolado se for HTML que você já sanitizou; texto cru de usuário que comece com `<` seria injetado como marcação. Já `post.title` é escapado normalmente pelo `htmlString`, e no `<title>` montado à mão usamos `escapeHtml`.
+No SSR, uma string que começa com `<` é tratada como HTML pronto e sai sem escape. Por isso, dentro de `htmlString`, todo texto de usuário (`post.title`, `user.name`, `user.email`...) passa por `text()`: o valor é escapado **desde que não comece com `<`**, e o espaço inicial garante isso. `post.content` só pode ser interpolado direto se for HTML que você já sanitizou. No `<title>` do documento, montado à mão com template literal comum, use `escapeHtml` (que dentro de `htmlString` escaparia duas vezes).
 :::
 
 ### Cliente
