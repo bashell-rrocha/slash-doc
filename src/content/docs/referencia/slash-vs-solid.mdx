@@ -361,21 +361,20 @@ stream.pipe(response)
 
 ```typescript
 // server.ts
-import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App'
 
 // renderToString devolve { html, state }
 const { html: appHtml, state } = renderToString(() => App())
 
-const fullHtml = htmlString`
-  <!DOCTYPE html>
-  <html>
-    <body>
-      <div id="app">${appHtml}</div>
-      <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-    </body>
-  </html>
-`
+// O documento é um template literal comum (htmlString com <!DOCTYPE> não funciona)
+const fullHtml = `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+  </body>
+</html>`
 
 response.send(fullHtml)
 ```

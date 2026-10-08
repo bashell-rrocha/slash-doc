@@ -40,10 +40,7 @@ Este guia cobre como adotar Slash em diferentes contextos: migrando de outras bi
 
   <TabItem label="CDN">
   ```html
-  <!-- UMD build -->
-  <script src="https://unpkg.com/@_bashell/slash"></script>
-
-  <!-- ES Module -->
+  <!-- ES Module (via esm.sh) -->
   <script type="module">
     import { html, createState } from 'https://esm.sh/@_bashell/slash'
   </script>
@@ -466,6 +463,9 @@ import { html, render, createState } from '@_bashell/slash'
 
 class CounterElement extends HTMLElement {
   connectedCallback() {
+    // connectedCallback roda de novo se o elemento for movido ou reinserido:
+    // não chame attachShadow (lança erro) nem monte duas vezes
+    if (this.shadowRoot) return
     const shadow = this.attachShadow({ mode: 'open' })
 
     // O state vive na instância, fora do componente
@@ -700,7 +700,7 @@ bun add -d @types/express
 
 ```typescript title="server.ts"
 import express from 'express'
-import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App' // App usa htmlString no servidor
 
 const app = express()
@@ -709,19 +709,19 @@ app.get('*', (req, res) => {
   // renderToString devolve { html, state }
   const { html: appHtml, state } = renderToString(() => App())
 
-  const html = htmlString`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>SSR App</title>
-        <script type="module" src="/client.js"></script>
-      </head>
-      <body>
-        <div id="app">${appHtml}</div>
-        <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-      </body>
-    </html>
-  `
+  // O documento é um template literal comum (htmlString com <!DOCTYPE> não funciona).
+  // O título é fixo aqui; se vier de dado de usuário, escape-o à mão.
+  const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>SSR App</title>
+    <script type="module" src="/client.js"></script>
+  </head>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+  </body>
+</html>`
 
   res.send(html)
 })
@@ -734,7 +734,7 @@ app.listen(3000, () => {
 ### Bun Server
 
 ```typescript title="server.ts"
-import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
+import { renderToString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App' // App usa htmlString no servidor
 
 Bun.serve({
@@ -742,22 +742,21 @@ Bun.serve({
   fetch(req) {
     const { html: appHtml, state } = renderToString(() => App())
 
-    const html = htmlString`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>SSR App</title>
-        </head>
-        <body>
-          <div id="app">${appHtml}</div>
-          <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
-          <script type="module" src="/client.js"></script>
-        </body>
-      </html>
-    `
+    // Template literal comum para o documento (não use htmlString com <!DOCTYPE>)
+    const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>SSR App</title>
+  </head>
+  <body>
+    <div id="app">${appHtml}</div>
+    <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>`
 
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html' }
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   }
 })
