@@ -18,7 +18,7 @@ Esta página compara Slash e React em termos de arquitetura, performance, DX (De
 |---------|-------|-------|
 | **Tamanho** | ~5KB | ~42KB (React + ReactDOM) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
-| **Reatividade** | Observer Pattern (fine-grained) | Re-render component tree |
+| **Reatividade** | Observer Pattern (re-render por componente que lê o state) | Re-render component tree |
 | **SSR** | ✅ Nativo | ✅ Sim (com frameworks) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro e extenso |
 | **Curva de Aprendizado** | Baixa | Média |
@@ -63,19 +63,20 @@ function Counter() {
 
 ### Slash: Observer Pattern (Sem VDOM)
 
-Slash usa um sistema de estado reativo baseado em Observer Pattern que atualiza o DOM diretamente:
+Slash usa um sistema de estado reativo baseado em Observer Pattern: um componente que lê `state.get()` re-executa quando o state muda e seus nós são substituídos, sem diff de Virtual DOM:
 
 ```typescript
 // Slash
 import { html, createState } from '@_bashell/slash'
 
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
+
+// Monte como <${Counter} />
 function Counter() {
-  const count = createState(0)
+  // Componente re-executa quando count muda (porque leu count.get())
+  console.log('Component rendered')
 
-  // Componente NÃO re-executa quando count muda
-  console.log('Component created')
-
-  // Apenas este texto atualiza
   return html`
     <div>
       <p>Count: ${count.get()}</p>
@@ -89,13 +90,13 @@ function Counter() {
 
 **Como funciona:**
 1. State muda via `count.set()`
-2. Slash atualiza apenas o nó DOM específico
-3. Componente NÃO re-executa
+2. O componente que leu `count.get()` executa de novo
+3. Os nós anteriores do componente são substituídos pelos novos
 4. Sem diff de Virtual DOM
-5. Update extremamente eficiente
+5. A granularidade é o componente: divida a interface em componentes pequenos para re-renderizar só o necessário
 
 <Aside type="note">
-A principal diferença: React re-executa componentes, Slash atualiza DOM diretamente via Observer Pattern com state reativo.
+A principal diferença: React reconcilia uma árvore virtual, Slash substitui os nós dos componentes que leram o state alterado, sem Virtual DOM.
 </Aside>
 
 ---

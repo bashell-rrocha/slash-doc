@@ -10,7 +10,7 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 # Slash vs SolidJS
 
-Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosofia similar: **reatividade fine-grained sem Virtual DOM**. Apesar das semelhanças, há diferenças importantes em implementação e trade-offs.
+Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosofia similar: **sem Virtual DOM**, com modelos de reatividade diferentes. Apesar das semelhanças, há diferenças importantes em implementação e trade-offs.
 
 ## Resumo Rápido
 
@@ -26,25 +26,23 @@ Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosof
 | **Ecossistema** | 🌱 Crescendo | 🌳 Crescendo forte |
 
 <Aside type="note">
-**Similaridades:** Ambos eliminam Virtual DOM e fazem updates diretos no DOM. **Diferença chave:** SolidJS usa true fine-grained Signals com compiler auto-tracking, Slash usa Observer Pattern com tracking manual explícito via `.get()`, `.set()` e `.watch()`.
+**Similaridades:** Ambos eliminam Virtual DOM. **Diferença chave:** SolidJS usa true fine-grained Signals, onde componentes executam uma vez e só o ponto afetado atualiza. Slash usa Observer Pattern: um componente que lê `state.get()` re-executa quando o state muda e seus nós são substituídos (granularidade por componente).
 </Aside>
 
 ---
 
 ## Filosofia e Arquitetura
 
-### Filosofia Compartilhada: Fine-Grained Updates
+### Filosofia Compartilhada
 
 Slash e SolidJS compartilham filosofia similar:
 
 1. ✅ **Sem Virtual DOM** - Updates diretos no DOM
-2. ✅ **Reatividade granular** - Apenas o que mudou é atualizado
-3. ✅ **Fine-grained updates** - Updates cirúrgicos no DOM
-4. ✅ **Performance first** - Otimizados por design
+2. ✅ **Performance first** - Otimizados por design
 
 **Diferença na implementação:**
-- **SolidJS**: True fine-grained Signals com auto-tracking
-- **Slash**: Observer Pattern com watchers/subscribers explícitos
+- **SolidJS**: True fine-grained Signals com auto-tracking (atualiza só o ponto afetado)
+- **Slash**: Observer Pattern com re-render por componente (atualiza o componente que leu o state)
 
 ### Diferença: True Signals vs Observer Pattern
 
@@ -57,9 +55,9 @@ Slash e SolidJS compartilham filosofia similar:
 **Slash (Observer Pattern):**
 - Estado reativo tradicional com observers/watchers
 - 100% runtime, sem compiler
-- Componentes também executam uma vez
+- Componentes re-executam quando um state lido muda (monte-os como `<${Comp} />`)
 - `createState()` com `.get()`, `.set()`, `.watch()` explícitos
-- Sem auto-tracking, controle manual total
+- Tracking por componente: as chamadas a `get()` durante a execução do componente definem suas dependências; `.watch()` é o controle manual
 
 ---
 
@@ -95,11 +93,12 @@ function Counter() {
 // Slash
 import { html, createState } from '@_bashell/slash'
 
-function Counter() {
-  const count = createState(0)
+// O state fica fora do componente: se fosse criado dentro, seria recriado a cada render
+const count = createState(0)
 
-  // Componente executa UMA vez
-  console.log('Component created')
+function Counter() {
+  // Componente re-executa quando count muda
+  console.log('Component rendered')
 
   return html`
     <div>
@@ -112,7 +111,7 @@ function Counter() {
 }
 ```
 
-**Observação:** Sintaxe muito similar! Ambos executam componente uma vez apenas.
+**Observação:** A sintaxe é parecida, mas o modelo de execução difere: no Solid o componente executa uma vez; no Slash ele re-executa quando um state que leu muda.
 
   </TabItem>
 
@@ -608,13 +607,13 @@ React/Vue:
 State change → Re-render → VDOM diff → Patch DOM
               ↑___________|
 
-Slash/Solid:
-State change → Update DOM diretamente
+Solid: State change → Update DOM diretamente
+Slash: State change → Re-executa o componente → Substitui seus nós (sem diff)
 ```
 
-### Fine-Grained Reactivity
+### Fine-Grained Reactivity (Solid)
 
-Apenas o que mudou é atualizado:
+No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
 
 ```jsx
 // Se apenas count muda:
