@@ -379,16 +379,18 @@ stream.pipe(response)
 
 ```typescript
 // server.ts
-import { renderToString, htmlString } from '@_bashell/slash'
+import { renderToString, htmlString, serializeStateForScript } from '@_bashell/slash/ssr'
 import { App } from './App'
 
-const appHtml = renderToString(App())
+// renderToString devolve { html, state }
+const { html: appHtml, state } = renderToString(() => App())
 
 const fullHtml = htmlString`
   <!DOCTYPE html>
   <html>
     <body>
       <div id="app">${appHtml}</div>
+      <script id="__SLASH_STATE__" type="application/json">${serializeStateForScript(state)}</script>
     </body>
   </html>
 `
@@ -399,7 +401,7 @@ response.send(fullHtml)
 **Features:**
 - ✅ Renderização síncrona
 - ✅ Streaming básico
-- ✅ Hidratação simples
+- ✅ Hidratação simples (o cliente limpa o HTML do servidor e renderiza de novo)
 - 🔜 Features avançadas em desenvolvimento
 
 **Veredito:** SolidJS tem SSR mais maduro e avançado. Slash é mais simples mas funcional.

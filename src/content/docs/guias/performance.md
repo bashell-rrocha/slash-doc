@@ -465,26 +465,28 @@ const loadData = async (userId: number) => {
 Use `renderToStream()` em vez de `renderToString()` para melhor TTFB:
 
 ```typescript
-import { renderToStream } from '@_bashell/slash'
+import { renderToString, renderToStream } from '@_bashell/slash/ssr'
 
-// ❌ Espera renderização completa
-const html = renderToString(App())
+// ❌ Espera renderização completa (devolve { html, state })
+const { html } = renderToString(App)
 response.send(html)
 
-// ✅ Stream chunks progressivamente
-const stream = renderToStream(App())
-stream.pipeTo(response.writable)
+// ✅ Chunks progressivos: renderToStream é um async generator de strings
+for await (const chunk of renderToStream(App)) {
+  response.write(chunk)
+}
+response.end()
 ```
 
-### Hydration Optimization
+### Primeira renderização no cliente
 
-Minimize JavaScript executado na hydration:
+O cliente renderiza a view de novo por cima do HTML do servidor (veja [Hydration](/avancado/hydration/)); minimize o trabalho dessa primeira execução:
 
 ```typescript
 import { html, isServer } from '@_bashell/slash'
 
 const App = () => {
-  // ❌ Executa lógica pesada em hydration
+  // ❌ Executa lógica pesada na primeira renderização
   const data = isServer() ? serverData : expensiveClientComputation()
 
   // ✅ Use dados pré-computados do servidor

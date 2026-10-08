@@ -16,7 +16,7 @@ Universal Data Loading (ou Data Fetching Isomórfico) permite que você escreva 
 
 - ✅ **Código Único**: Mesma lógica funciona em servidor e cliente
 - ✅ **Cache Inteligente**: Reduz requisições desnecessárias
-- ✅ **Hidratação Automática**: Dados do servidor são reutilizados no cliente
+- ✅ **Hidratação do cache**: dados do servidor entram no cache do cliente com `hydrateLoaderCache`
 - ✅ **TTL Configurável**: Controle fino sobre expiração de cache
 - ✅ **Invalidação Seletiva**: Limpar cache por chave ou tudo
 
@@ -789,5 +789,5 @@ console.log('Parsed:', data)
 ## Próximos Passos
 
 - Veja [SSR](/avancado/ssr) para renderização no servidor
-- Explore [Hydration](/avancado/hydration) para reconectar estados
+- Explore [Hydration](/avancado/hydration) para ver o que o cliente faz com o HTML do servidor
 - Confira exemplos no [template slash-ssr](https://github.com/bashell-rrocha/slash-ssr)

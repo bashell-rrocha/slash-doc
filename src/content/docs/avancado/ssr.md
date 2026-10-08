@@ -90,7 +90,7 @@ console.log(state)
 // { s0: 0 }
 ```
 
-Note os **marcadores de reatividade** (`<!--reactive-start:s0-->` e `<!--reactive-end:s0-->`). Eles são usados durante a hidratação no cliente para reconectar os estados reativos.
+Note os **marcadores de reatividade** (`<!--reactive-start:s0-->` e `<!--reactive-end:s0-->`). Eles delimitam regiões que dependem de valor lido durante a renderização. O cliente atual não os usa para reconectar estados: `render()` descarta o HTML do servidor e renderiza de novo (veja [Hydration](/avancado/hydration)).
 
 ## `htmlString` - Template Tag para SSR
 
@@ -293,7 +293,7 @@ O conteúdo é gerado com `serializeStateForScript`, então `<`, `>` e `&` já s
 
 ## Atributos Reativos
 
-Quando você usa estados reativos em atributos, o Slash adiciona marcadores `data-reactive-*` para hidratação:
+Quando um valor lido de um state é usado em atributos, o Slash adiciona marcadores `data-reactive-*` ao HTML do servidor:
 
 ```typescript
 const isActive = createState({ value: true })
@@ -332,7 +332,7 @@ const { html } = renderToString(Button)
 // (onClick foi removido)
 ```
 
-Os event handlers serão **automaticamente reconectados** durante a hidratação no cliente.
+Os event handlers só existem depois que o cliente renderiza: `render()` no cliente limpa o container e renderiza de novo, com os handlers (veja [Hydration](/avancado/hydration)).
 
 ## Void Elements
 
@@ -580,14 +580,14 @@ app.listen(3000)
 - ✅ Serialize o estado com `serializeStateForScript` (nunca `JSON.stringify` cru dentro de `<script>`) e injete no HTML
 - ✅ `State` não é reativo no SSR: interpole `state.get()`
 - ✅ `Router` funciona no SSR (use `initialPath`)
-- ✅ Implemente hidratação no cliente (veja [Hydration](/avancado/hydration))
-- ✅ Event handlers são ignorados no servidor (reconectados no cliente)
+- ✅ No cliente, `render()` substitui o HTML do servidor por uma renderização nova (veja [Hydration](/avancado/hydration))
+- ✅ Event handlers são ignorados no servidor (existem depois que o cliente renderiza)
 - ✅ Atributos reativos recebem marcadores `data-reactive-*`
 - ✅ Texto interpolado é escapado, **exceto** strings que começam com `<` (tratadas como HTML pronto, inclusive `${state.get()}`): escape dado de usuário antes
 
 ## Próximos Passos
 
-- Aprenda sobre [Hydration](/avancado/hydration) para reconectar o estado no cliente
+- Aprenda sobre [Hydration](/avancado/hydration) para entender o que o cliente faz com o HTML do servidor
 - Explore [Universal Data Loading](/avancado/data-loading) para data fetching isomórfico
 - Veja exemplos práticos no [template slash-ssr](https://github.com/bashell-rrocha/slash-ssr)
 - Para sites cujo conteúdo é conhecido no build, veja [Geração Estática (SSG)](/avancado/ssg)

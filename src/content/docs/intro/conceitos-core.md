@@ -92,7 +92,7 @@ Quando `count.set()` é chamado, os componentes que leram `count.get()` durante 
 
 - **SPAs (Single Page Applications)**: Roteamento integrado e gerenciamento de estado
 - **SSR Applications**: Suporte nativo para renderização server-side com hidratação
-- **Progressive Enhancement**: Hidratação de HTML estático gerado no servidor
+- **Progressive Enhancement**: HTML do servidor visível antes do JS; o cliente o substitui por uma renderização nova
 - **Aplicações com foco em performance**: Quando bundle size e velocidade são críticos
 - **Projetos TypeScript**: Type safety completo em toda a API
 
