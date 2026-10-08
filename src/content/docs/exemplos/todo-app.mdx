@@ -199,15 +199,23 @@ export const TodoItem = ({ todo }: TodoItemProps) => {
     }, 0)
   }
 
-  const handleSave = (e: Event) => {
-    const input = e.target as HTMLInputElement
-    if (input.value.trim()) editTodo(todo.id, input.value)
+  // Enter, Escape e blur encerram a edição. Remover o <input> (ao limpar editingId)
+  // dispara blur; `done` evita salvar duas vezes ou salvar depois de Escape.
+  let done = false
+
+  const finishEdit = (input: HTMLInputElement, save: boolean) => {
+    if (done) return
+    done = true
+    if (save && input.value.trim()) editTodo(todo.id, input.value)
     editingId.set(null)
   }
 
+  const handleBlur = (e: Event) => finishEdit(e.target as HTMLInputElement, true)
+
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') handleSave(e)
-    else if (e.key === 'Escape') editingId.set(null)
+    const input = e.target as HTMLInputElement
+    if (e.key === 'Enter') finishEdit(input, true)
+    else if (e.key === 'Escape') finishEdit(input, false)
   }
 
   return html`
@@ -233,7 +241,7 @@ export const TodoItem = ({ todo }: TodoItemProps) => {
           class="edit"
           type="text"
           value=${todo.text}
-          onBlur=${handleSave}
+          onBlur=${handleBlur}
           onKeyDown=${handleKeyDown}
         />
       `}
