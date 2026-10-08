@@ -2,6 +2,10 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui, seguindo [Conventional Commits](https://www.conventionalcommits.org/) e [SemVer](https://semver.org/).
 
+## [0.0.4] — 2026-10-08
+
+- Deploy automático no Cloudflare Pages pelo GitHub Actions a cada release na `main` (`.github/workflows/deploy.yml`); `bun.lock` próprio para instalação reprodutível.
+
 ## [0.0.3] — 2026-10-08
 
 - Documentação alinhada ao `@_bashell/slash` 0.0.3: nova página **Segurança**, `htmlString` devolve `SafeHtml`, `unsafeHtml`/`unsafeUrl`, `sanitizeUrl`, política de URLs/CSS, `Link` com `external`, builds de desenvolvimento e produção.
