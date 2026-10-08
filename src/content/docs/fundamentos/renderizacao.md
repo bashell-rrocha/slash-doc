@@ -200,7 +200,7 @@ const styles = { color: 'red', fontSize: '16px' }
 const el2 = html`<div style=${styles}></div>`
 ```
 
-Cada declaração passa por uma política de CSS: declarações inseguras (`url(javascript:...)`, `expression(...)`, barra invertida fora de aspas) são descartadas e as demais são mantidas. Um `style` que fica vazio é omitido. Veja [Segurança](/fundamentos/seguranca/).
+Cada declaração passa por uma política de CSS: declarações inseguras (`url(javascript:...)`, `expression(...)`, comentários `/* */`, barra invertida fora de aspas, `url()` sem aspas com caracteres fora do conjunto seguro) são descartadas e as demais são mantidas. Um `style` com mais de 8 KB é descartado, e um que fica vazio é omitido. Veja [Segurança](/fundamentos/seguranca/).
 
 ### Children (Filhos)
 

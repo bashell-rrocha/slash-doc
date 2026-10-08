@@ -165,19 +165,27 @@ Nomes de atributo inválidos (com espaço ou `>`, por exemplo) são descartados,
 
 ## Estilos (`style`)
 
-`style` aceita string ou objeto, e cada declaração passa por uma política de CSS no cliente e no servidor. Uma declaração insegura é descartada e as demais são mantidas:
+`style` aceita string ou objeto, e cada declaração passa por uma política de CSS estrita no cliente e no servidor. Uma declaração insegura é descartada (com aviso em dev) e as demais são mantidas:
 
 ```typescript
 html`<div style="color:red;background:url(javascript:alert(1))">x</div>`
 // <div style="color:red">x</div>
 ```
 
-Em resumo:
+Uma declaração é descartada quando:
 
-- `url()` segue a mesma lista de permissão de `href`/`src`; `image-set()`, `image()`, `cross-fade()`, `element()`, `paint()`, `src()` e `expression()` são fiscalizadas;
-- o valor não pode conter `{`, `}`, `<`, `@import`, `javascript:`, `vbscript:`, `-moz-binding` nem `behavior:`;
-- uma barra invertida (`\`) **fora de aspas** descarta a declaração; dentro de aspas os escapes continuam funcionando (`content:"\2022"`);
-- um `style` que fica vazio é omitido.
+- contém `/*` em qualquer lugar: comentários não são permitidos em `style` inline;
+- tem uma barra invertida (`\`) **fora de aspas**; dentro de aspas os escapes continuam funcionando (`content:"\2022"`);
+- tem uma string com quebra de linha crua, CR, FF ou NUL, com barra invertida seguida de quebra de linha, ou sem fechamento;
+- tem um `url(` **sem aspas** com caracteres fora de `[A-Za-z0-9-._~:/?#@!$&+,;=%]`; qualquer outro caractere exige aspas (`url("a b.png")` passa, `url(a b.png)` não);
+- usa `-moz-binding`, `behavior` ou `behaviour` como propriedade (`scroll-behavior` é permitido).
+
+Além disso:
+
+- `url()`, com ou sem aspas, segue a mesma lista de permissão de `href`/`src`; `image-set()`, `image()`, `cross-fade()`, `element()`, `paint()`, `src()` e `expression()` são fiscalizadas;
+- o valor não pode conter `{`, `}`, `<`, `@import`, `javascript:` nem `vbscript:`;
+- quebras de linha **entre** declarações são válidas, então um template literal em várias linhas funciona;
+- um `style` com mais de **8 KB** é descartado por inteiro, e um `style` que fica vazio é omitido.
 
 ## Dados sem protótipo
 

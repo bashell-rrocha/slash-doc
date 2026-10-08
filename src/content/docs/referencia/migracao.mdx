@@ -70,7 +70,7 @@ A 0.0.3 torna o core **seguro por padrão**. Uma string é sempre texto, URLs e 
 | chama `__addBatchEndCallback`, `__removeBatchEndCallback` ou `__recordBatchUpdate` | removidos | use `batch()` e `state.watch()` |
 | monta um `RouterInstance` à mão (mock) | `ready` é obrigatório | adicione `ready: Promise.resolve()` |
 | chama `data.hasOwnProperty(...)` em `formToObject()` ou `router.query` | esses objetos não têm protótipo | `Object.hasOwn(data, "campo")` |
-| usava strings `style="..."` no cliente aplicadas como vieram | declarações inseguras são descartadas | use só valores CSS simples (escapes só dentro de aspas) |
+| usava strings `style="..."` no cliente aplicadas como vieram | declarações inseguras são descartadas | use só valores CSS simples: sem comentários `/* */`, escapes só dentro de aspas, `url("a b.png")` com aspas se houver caracteres especiais, no máximo 8 KB |
 
 Buscas rápidas para achar os casos no seu projeto:
 
