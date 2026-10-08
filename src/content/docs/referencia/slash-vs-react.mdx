@@ -18,7 +18,7 @@ Esta página compara Slash e React em termos de arquitetura, performance, DX (De
 |---------|-------|-------|
 | **Virtual DOM** | ❌ Não | ✅ Sim |
 | **Reatividade** | Observer Pattern (re-render por componente que lê o state) | Re-render component tree |
-| **SSR** | ✅ Nativo | ✅ Sim (com frameworks) |
+| **SSR** | ✅ `renderToString`/`renderToStream` no pacote | ✅ `react-dom/server` (frameworks adicionam roteamento e data loading) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro e extenso |
 | **Curva de Aprendizado** | Baixa | Média |
 | **Tooling** | TypeScript nativo | Excelente (DevTools, etc) |
@@ -78,7 +78,7 @@ function Counter() {
   return html`
     <div>
       <p>Count: ${count.get()}</p>
-      <button onclick=${() => count.set(count.get() + 1)}>
+      <button onClick=${() => count.set(count.get() + 1)}>
         Increment
       </button>
     </div>
@@ -247,11 +247,11 @@ function LoginForm() {
   return html`
     <form onSubmit=${handleSubmit}>
       <input
-        onInput=${(e) => form.set({ ...form.get(), email: e.target.value })}
+        onInput=${(e: Event) => form.set({ ...form.get(), email: (e.target as HTMLInputElement).value })}
       />
       <input
         type="password"
-        onInput=${(e) => form.set({ ...form.get(), password: e.target.value })}
+        onInput=${(e: Event) => form.set({ ...form.get(), password: (e.target as HTMLInputElement).value })}
       />
       <button type="submit">Login</button>
     </form>
@@ -312,7 +312,7 @@ npm install redux
 - 🎯 Ideal para apps pequenos/médios
 
 <Aside type="tip">
-Se você precisa de um ecossistema maduro e extenso, React é a escolha mais segura. Se valoriza simplicidade e performance, Slash é excelente.
+Se você precisa de um ecossistema maduro e extenso, React é a escolha mais segura. Se valoriza simplicidade e uma API pequena, Slash pode ser uma boa escolha.
 </Aside>
 
 ---
@@ -342,14 +342,14 @@ Se você precisa de um ecossistema maduro e extenso, React é a escolha mais seg
 
 ### Quando Usar Slash
 
-1. **Performance Crítica**
-   - SPAs que precisam ser extremamente rápidas
-   - Dispositivos móveis de baixo custo
-   - Aplicações em tempo real
+1. **Controle sobre o DOM**
+   - Atualizações diretas, sem Virtual DOM
+   - Integração com código DOM existente
+   - Aplicações com poucas dependências
 
 2. **Bundle Size Limitado**
-   - PWAs com strict budget
-   - Sites com slow networks
+   - Um app mínimo mede 5,12 KB gzip (veja a seção Performance)
+   - Quando cada dependência conta
    - Embedded apps
 
 3. **Simplicidade e Rapidez de Desenvolvimento**
@@ -450,11 +450,10 @@ function TodoItem({ todo, onToggle }) {
 - ✅ React Native para mobile
 
 **Contras:**
-- ❌ Bundle size maior
-- ❌ Performance requer otimizações
+- ❌ Mais dependências (`react` e `react-dom`)
 - ❌ Mais boilerplate (hooks, etc)
 - ❌ Re-renders podem ser confusos
-- ❌ Necessita frameworks para SSR
+- ❌ SSR com roteamento e data loading costuma exigir um framework
 
 ### Slash
 
@@ -484,8 +483,8 @@ function TodoItem({ todo, onToggle }) {
 - Valoriza estabilidade e padrões
 
 **Escolha Slash se:**
-- Performance é crítica
-- Bundle size é limitação
+- Quer uma biblioteca pequena e sem dependências
+- Bundle size é limitação (app mínimo: 5,12 KB gzip)
 - Prefere simplicidade
 - Gosta de controle direto
 - App pequena/média

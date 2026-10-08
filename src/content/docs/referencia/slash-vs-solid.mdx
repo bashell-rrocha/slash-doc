@@ -36,7 +36,7 @@ Esta página compara Slash e SolidJS - duas bibliotecas que compartilham filosof
 Slash e SolidJS compartilham filosofia similar:
 
 1. ✅ **Sem Virtual DOM** - Updates diretos no DOM
-2. ✅ **Performance first** - Otimizados por design
+2. ✅ **Atualização direta do DOM** - sem diffing de árvore virtual
 
 **Diferença na implementação:**
 - **SolidJS**: True fine-grained Signals com auto-tracking (atualiza só o ponto afetado)
@@ -46,7 +46,7 @@ Slash e SolidJS compartilham filosofia similar:
 
 **SolidJS (True Signals):**
 - Fine-grained reactive primitives com auto-tracking
-- Usa JSX compiler para otimizar dependências
+- Rastreia dependências em runtime; o compiler JSX apenas transforma o template
 - Componentes executam uma única vez
 - `createSignal()`, `createEffect()`, `createMemo()` auto-detectam deps
 
@@ -265,7 +265,7 @@ Para o Slash, o repositório mede o tamanho de um app mínimo (`createState` + `
 
 ## Auto-tracking vs Manual Tracking
 
-### SolidJS: Auto-tracking (Compiler Magic)
+### SolidJS: Auto-tracking (em runtime)
 
 ```jsx
 import { createSignal, createEffect } from 'solid-js'
@@ -275,7 +275,7 @@ function Example() {
   const [name, setName] = createSignal('John')
 
   createEffect(() => {
-    // Compiler detecta que este effect depende de count
+    // O runtime detecta que este effect depende de count (leu count())
     console.log('Count changed:', count())
     // name() não é chamado, então não é dependência
   })
@@ -427,10 +427,10 @@ response.send(fullHtml)
 
 ### Quando Usar SolidJS
 
-1. **Performance Extrema é Crítica**
-   - Apps de alta frequência de updates
-   - Dashboards real-time
-   - Games/animações
+1. **Atualizações Granulares**
+   - Reatividade fine-grained (atualiza só o ponto afetado)
+   - Componentes que executam uma única vez
+   - Apps com muitos updates pequenos
 
 2. **Quer Auto-tracking**
    - Prefere conveniência do compiler
@@ -459,9 +459,9 @@ response.send(fullHtml)
    - Gosta de APIs explícitas
    - Quer entender tudo que acontece
 
-3. **Bundle Size Mínimo**
-   - Cada byte conta
-   - PWAs com budget apertado
+3. **Bundle Size Pequeno**
+   - Um app mínimo mede 5,12 KB gzip
+   - Poucas dependências
    - Embedded apps
 
 4. **Prototipagem Rápida**
@@ -557,7 +557,7 @@ function TodoApp() {
 
 **Contras:**
 - ❌ Necessita build step
-- ❌ Compiler "magic" (menos previsível)
+- ❌ Rastreamento implícito (menos explícito)
 - ❌ Curva de aprendizado de reactivity
 
 ### Slash
@@ -568,7 +568,7 @@ function TodoApp() {
 - ✅ Bundle pequeno (veja a medição em Benchmarks e tamanho)
 - ✅ Zero config
 - ✅ TypeScript first-class
-- ✅ Extremamente simples
+- ✅ API pequena e simples
 
 **Contras:**
 - ❌ Tracking manual (mais verboso)
@@ -613,7 +613,7 @@ No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
 
 ### Escolha SolidJS se:
 
-- Quer performance top absoluta
+- Quer reatividade fine-grained
 - Prefere auto-tracking (menos boilerplate)
 - Vem de React e gosta de JSX
 - Precisa SSR avançado
@@ -625,7 +625,7 @@ No Solid apenas o que mudou é atualizado. No Slash a unidade é o componente:
 - Valoriza simplicidade extrema
 - Prefere explicitness > magic
 - Não quer build step
-- Bundle size é crítico
+- Quer uma biblioteca pequena (app mínimo: 5,12 KB gzip)
 - Quer controle total
 - Aprecia APIs minimalistas
 

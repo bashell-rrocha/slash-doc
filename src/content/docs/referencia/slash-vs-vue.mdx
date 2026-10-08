@@ -19,7 +19,7 @@ Esta página compara Slash e Vue em termos de sistema de reatividade, APIs, perf
 | **Reatividade** | Observer Pattern explícito | Proxy-based (Composition API) |
 | **Virtual DOM** | ❌ Não | ✅ Sim |
 | **Template Syntax** | HTM (JSX-like) | Template strings ou JSX |
-| **SSR** | ✅ Nativo | ✅ Sim (com Nuxt ou setup manual) |
+| **SSR** | ✅ `renderToString`/`renderToStream` no pacote | ✅ `vue/server-renderer` (Nuxt adiciona o resto) |
 | **Ecossistema** | 🌱 Crescendo | 🌳 Maduro |
 | **Curva de Aprendizado** | Baixa | Média |
 | **Compile-time** | ❌ Runtime-only | ✅ Compiler otimizado |
@@ -150,8 +150,7 @@ function Counter() {
 ```vue
 <!-- Vue 3 -->
 <script setup>
-import { defineProps, defineEmits } from 'vue'
-
+// defineProps e defineEmits são macros do compilador: não precisam de import
 const props = defineProps({
   title: String,
   count: Number
@@ -251,11 +250,11 @@ function NameForm() {
     <div>
       <input
         value="John"
-        onInput=${(e) => firstName.set(e.target.value)}
+        onInput=${(e: Event) => firstName.set((e.target as HTMLInputElement).value)}
       />
       <input
         value="Doe"
-        onInput=${(e) => lastName.set(e.target.value)}
+        onInput=${(e: Event) => lastName.set((e.target as HTMLInputElement).value)}
       />
       <${FullName} />
     </div>
@@ -428,8 +427,7 @@ function TodoList() {
 - ✅ Comunidade grande
 
 **Contras:**
-- ❌ Bundle maior
-- ❌ Virtual DOM overhead
+- ❌ Mais dependências e conceitos (compiler, Virtual DOM)
 - ❌ Necessita build step para melhor DX
 - ❌ Mais abstrações/magic
 - ❌ Curva de aprendizado maior
@@ -463,7 +461,7 @@ function TodoList() {
 - Projeto médio/grande
 
 **Escolha Slash se:**
-- Performance/size críticos
+- Quer uma biblioteca pequena (app mínimo: 5,12 KB gzip)
 - Prefere simplicidade
 - Não quer build step
 - Gosta de explicitness
