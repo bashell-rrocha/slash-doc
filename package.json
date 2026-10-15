@@ -1,7 +1,7 @@
 {
   "name": "@_bashell/slash-docs",
   "type": "module",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "scripts": {
     "dev": "astro dev",
@@ -9,7 +9,9 @@
     "build": "astro build",
     "preview": "astro preview",
     "deploy": "astro build && bunx wrangler pages deploy dist --project-name=slash-docs",
-    "astro": "astro"
+    "test": "bun test scripts/",
+    "astro": "astro",
+    "boundary": "bun run scripts/boundary.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.37.6",

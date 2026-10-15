@@ -1,0 +1,43 @@
+# Garante que o site de documentação compila antes de qualquer merge:
+# roda em todo PR e nos pushes de develop e main. Sem deploy e sem segredos.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Testes dos scripts
+        run: bun run test
+
+      # Dependabot não recebe os segredos do repositório: este passo falha para ele por desenho
+      # (refaça o PR numa branch de mantenedor ou rode de novo por lá).
+      - name: Fronteira
+        run: bun run boundary
+        env:
+          BOUNDARY_TERMS: ${{ secrets.BOUNDARY_TERMS }}
+          GITHUB_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Build
+        run: bun run build
