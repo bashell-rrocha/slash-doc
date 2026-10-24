@@ -2,6 +2,10 @@
 
 Todas as mudanças relevantes deste projeto são registradas aqui, seguindo [Conventional Commits](https://www.conventionalcommits.org/) e [SemVer](https://semver.org/).
 
+## [Não publicado]
+
+- Tema: `starlight-theme-catppuccin` na API v2 (`dark: 'mocha-mauve'`, `light: 'latte-mauve'`); as opções `flavor` e `accent` eram ignoradas.
+
 ## [0.0.6] — 2026-10-15
 
 - Testes no CI em todo PR e verificação de fronteira (`bun run boundary`): falha se aparecer um termo proibido, lido do segredo `BOUNDARY_TERMS`; o log mostra só o arquivo e a linha.
