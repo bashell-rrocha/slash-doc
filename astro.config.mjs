@@ -15,8 +15,8 @@ export default defineConfig({
 			],
 			plugins: [
 				starlightThemeCatppuccin({
-					flavor: 'mocha',
-					accent: 'mauve'
+					dark: 'mocha-mauve',
+					light: 'latte-mauve'
 				})
 			],
 			sidebar: [
